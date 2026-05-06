@@ -1,0 +1,13 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.pytest_cache/
+*.db
+
+# Node
+node_modules/
+dist/

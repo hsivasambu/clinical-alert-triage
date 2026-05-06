@@ -1,0 +1,33 @@
+{
+  "alert_id": "EDGE-NOISE-001",
+  "source_system": "ehr_clinical_decision_support",
+  "alert_type": "sepsis",
+  "patient_id": "PT-EDGE-1003",
+  "unit": "4-Medical",
+  "room": "441",
+  "bed": "C",
+  "timestamp": "2026-04-19T01:18:00Z",
+  "vital_signs": {
+    "heart_rate": null,
+    "spo2": null,
+    "blood_pressure_systolic": null,
+    "blood_pressure_diastolic": null,
+    "respiratory_rate": null,
+    "temperature": null
+  },
+  "message_text": "Auto-screen fired from incomplete charting batch; source data may be delayed or duplicated.",
+  "device_type": "ehr_clinical_decision_support",
+  "repeat_count": 0,
+  "recent_context": {
+    "prior_alerts_24h": 0,
+    "recent_medications": [],
+    "fall_risk_score": null,
+    "admission_reason": null,
+    "code_status": null
+  },
+  "additional_context": {
+    "data_quality": "incomplete",
+    "feed_status": "partial_backfill",
+    "suspected_source": "unknown"
+  }
+}

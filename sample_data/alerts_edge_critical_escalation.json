@@ -1,0 +1,32 @@
+{
+  "alert_id": "EDGE-CRIT-001",
+  "source_system": "pulse_ox_monitor",
+  "alert_type": "low_spo2",
+  "patient_id": "PT-EDGE-1001",
+  "unit": "2-ICU Step-Down",
+  "room": "214",
+  "bed": "B",
+  "timestamp": "2026-04-19T01:10:00Z",
+  "vital_signs": {
+    "heart_rate": 122,
+    "spo2": 84,
+    "blood_pressure_systolic": 94,
+    "blood_pressure_diastolic": 56,
+    "respiratory_rate": 30,
+    "temperature": 37.9
+  },
+  "message_text": "SpO2 persistently below 85% with rising respiratory effort.",
+  "device_type": "continuous_pulse_oximeter",
+  "repeat_count": 2,
+  "recent_context": {
+    "prior_alerts_24h": 4,
+    "recent_medications": ["high_flow_oxygen_documented"],
+    "fall_risk_score": null,
+    "admission_reason": "acute hypoxic respiratory failure",
+    "code_status": "full_code"
+  },
+  "additional_context": {
+    "waveform_quality": "good",
+    "trend_direction": "worsening"
+  }
+}

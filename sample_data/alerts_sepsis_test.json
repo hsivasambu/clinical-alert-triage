@@ -1,0 +1,35 @@
+{
+  "alert_id": "ALERT-101",
+  "source_system": "sepsis_screening_tool",
+  "alert_type": "sepsis",
+  "patient_id": "PT-7782",
+  "unit": "2-ICU Step-Down",
+  "room": "204",
+  "bed": "A",
+  "timestamp": "2024-04-14T14:10:00Z",
+  "vital_signs": {
+    "heart_rate": 118,
+    "spo2": 93,
+    "blood_pressure_systolic": 96,
+    "blood_pressure_diastolic": 58,
+    "respiratory_rate": 24,
+    "temperature": 38.9
+  },
+  "message_text": "Sepsis screening positive. 3 SIRS criteria met. Suspected urinary source.",
+  "device_type": "ehr_clinical_decision_support",
+  "repeat_count": 0,
+  "recent_context": {
+    "prior_alerts_24h": 1,
+    "recent_medications": ["normal_saline_500ml_IV"],
+    "fall_risk_score": 15,
+    "admission_reason": "urinary tract infection with systemic signs",
+    "code_status": "full_code"
+  },
+  "additional_context": {
+    "suspected_source": "urinary",
+    "wbc_k_ul": 14.2,
+    "lactate_mmol_l": 2.1,
+    "cultures_drawn": false
+  }
+}
+

@@ -1,0 +1,33 @@
+{
+  "alert_id": "ALERT-005",
+  "source_system": "bed_sensor_system",
+  "alert_type": "fall_risk",
+  "patient_id": "PT-1134",
+  "unit": "6-North Neuro",
+  "room": "614",
+  "bed": "B",
+  "timestamp": "2024-04-14T13:45:00Z",
+  "vital_signs": {
+    "heart_rate": 82,
+    "spo2": 96,
+    "blood_pressure_systolic": 142,
+    "blood_pressure_diastolic": 90,
+    "respiratory_rate": 16,
+    "temperature": 37.1
+  },
+  "message_text": "Bed exit sensor activated. Patient may be attempting to get up unassisted.",
+  "device_type": "bed_exit_sensor",
+  "repeat_count": 0,
+  "recent_context": {
+    "prior_alerts_24h": 2,
+    "recent_medications": ["lorazepam 1mg IV"],
+    "fall_risk_score": 65,
+    "admission_reason": "ischemic stroke",
+    "code_status": "full_code"
+  },
+  "additional_context": {
+    "trigger": "bed_exit_sensor",
+    "bed_alarm_active": true,
+    "recent_sedation": true
+  }
+}

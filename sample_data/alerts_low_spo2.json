@@ -1,0 +1,32 @@
+{
+  "alert_id": "ALERT-002",
+  "source_system": "pulse_oximetry",
+  "alert_type": "low_spo2",
+  "patient_id": "PT-3817",
+  "unit": "2-South Med/Surg",
+  "room": "208",
+  "bed": "B",
+  "timestamp": "2024-04-14T09:15:00Z",
+  "vital_signs": {
+    "heart_rate": 102,
+    "spo2": 85,
+    "blood_pressure_systolic": 110,
+    "blood_pressure_diastolic": 72,
+    "respiratory_rate": 26,
+    "temperature": 37.8
+  },
+  "message_text": "SpO2 critically low: 85%. Patient on 2L nasal cannula.",
+  "device_type": "pulse_oximeter",
+  "repeat_count": 1,
+  "recent_context": {
+    "prior_alerts_24h": 3,
+    "recent_medications": ["albuterol inhaler"],
+    "fall_risk_score": 25,
+    "admission_reason": "pneumonia",
+    "code_status": "full_code"
+  },
+  "additional_context": {
+    "oxygen_delivery": "nasal_cannula_2L",
+    "position": "supine"
+  }
+}

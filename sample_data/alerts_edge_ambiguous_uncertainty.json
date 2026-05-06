@@ -1,0 +1,32 @@
+{
+  "alert_id": "EDGE-AMB-001",
+  "source_system": "bed_exit_sensor",
+  "alert_type": "fall_risk",
+  "patient_id": "PT-EDGE-1002",
+  "unit": "5-Surgical",
+  "room": "518",
+  "bed": "A",
+  "timestamp": "2026-04-19T01:14:00Z",
+  "vital_signs": {
+    "heart_rate": null,
+    "spo2": null,
+    "blood_pressure_systolic": null,
+    "blood_pressure_diastolic": null,
+    "respiratory_rate": null,
+    "temperature": null
+  },
+  "message_text": "Intermittent bed-edge pressure change detected; patient not visualized leaving bed.",
+  "device_type": "bed_exit_sensor",
+  "repeat_count": 1,
+  "recent_context": {
+    "prior_alerts_24h": 1,
+    "recent_medications": ["hydromorphone", "diphenhydramine"],
+    "fall_risk_score": 43,
+    "admission_reason": "post-operative observation",
+    "code_status": "full_code"
+  },
+  "additional_context": {
+    "sensor_status": "intermittent_signal",
+    "last_round_note": "patient drowsy but redirectable"
+  }
+}
