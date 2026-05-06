@@ -1,5 +1,7 @@
 # Clinical Alert Triage Assistant
 
+**[Live Demo](https://clinical-alert-triage-t7t1.vercel.app)**
+
 A hybrid clinical alert triage demo that combines deterministic rules, optional LLM-backed explainability, and human review.
 
 The system is intentionally framed as decision support:
@@ -296,4 +298,33 @@ clinical-alert-triage/
 - stronger frontend automated test coverage
 - richer audit drill-down and filtering
 - evaluation views over override and feedback trends
-- deployment hardening for a hosted demo
+
+## Deployment
+
+The live demo is hosted on Render (backend) and Vercel (frontend).
+
+### Backend — Render
+
+- Service type: Web Service
+- Root directory: `backend`
+- Runtime: Python 3.11
+- Build command: `pip install -r requirements.txt`
+- Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Environment variables: `OPENAI_API_KEY`, `ALLOWED_ORIGINS`
+- Live URL: https://clinical-alert-triage-api.onrender.com
+- API docs: https://clinical-alert-triage-api.onrender.com/docs
+
+### Frontend — Vercel
+
+- Framework: Vite
+- Root directory: `frontend`
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variables: `VITE_API_URL`
+- Live URL: https://clinical-alert-triage-t7t1.vercel.app
+
+### Notes
+
+- The backend seeds 6 sample alerts on first startup if the database is empty.
+- Render's free tier has an ephemeral filesystem — submitted alerts do not persist across restarts, but sample alerts reseed automatically.
+- A free UptimeRobot monitor pings `/health` every 5 minutes to keep the backend warm.
