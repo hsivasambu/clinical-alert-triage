@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { api } from './api/client'
 import { AlertTable } from './components/AlertTable'
 import { AlertDetail } from './components/AlertDetail'
@@ -45,8 +46,10 @@ export default function App() {
   const hybridCount = results.filter((r) => r.explanation.explanation_mode === 'hybrid').length
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', minHeight: '100vh', background: '#f8f9fa' }}>
-      <header style={{ background: '#1a3a5c', color: 'white', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 12 }}>
+    <>
+      <Analytics />
+      <div style={{ fontFamily: 'system-ui, sans-serif', minHeight: '100vh', background: '#f8f9fa' }}>
+        <header style={{ background: '#1a3a5c', color: 'white', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 12 }}>
         <span style={{ fontSize: 20, fontWeight: 700 }}>Clinical Alert Triage</span>
         <span style={{ fontSize: 12, background: '#2980b9', padding: '2px 8px', borderRadius: 4 }}>
           MVP | {hybridCount > 0 ? 'hybrid active' : 'rules-only'}
@@ -157,6 +160,7 @@ export default function App() {
       {auditViewOpen && (
         <AuditView onClose={() => setAuditViewOpen(false)} />
       )}
-    </div>
+      </div>
+    </>
   )
 }
