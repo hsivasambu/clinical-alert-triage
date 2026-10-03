@@ -26,6 +26,7 @@ Safety contract (enforced in decision_layer.py):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -97,7 +98,17 @@ async def lifespan(app: FastAPI):
     for result in database.load_triage_results():
         _store[result.alert_id] = result
     if not _store:
-        _seed_sample_data()
+        # Seeding calls the LLM explainer once per sample alert (up to a 15s
+        # timeout each when OPENAI_API_KEY is set). Running that inline here,
+        # before `yield`, would block the ASGI app — including /health — from
+        # accepting any request until all sample alerts finish. On a host
+        # with an ephemeral filesystem this reseed happens on every cold
+        # start, so a slow/unreachable LLM provider would make the whole app
+        # (not just the LLM path) appear down right when a monitor or user
+        # hits it after idle. Run it in the background instead so the app is
+        # reachable immediately; seeded alerts simply appear a few seconds
+        # later.
+        asyncio.create_task(asyncio.to_thread(_seed_sample_data))
     yield
 
 
@@ -264,7 +275,13 @@ def feedback_categories() -> List[str]:
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+#
+# Liveness only: confirms the ASGI app is up and answering requests. No DB,
+# LLM, or other dependency check — a readiness probe would be a separate
+# endpoint. Starlette does not auto-add HEAD to a GET-only route (that's a
+# Flask behavior, not Starlette's), so HEAD must be declared explicitly or
+# monitors using HEAD get a 405.
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
