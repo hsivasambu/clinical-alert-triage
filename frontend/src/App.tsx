@@ -15,6 +15,10 @@ export default function App() {
   const visibleResults = filterQueue(results, filters)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [initializing, setInitializing] = useState(false)
+  const [refreshPaused, setRefreshPaused] = useState(false)
+  const refreshTimer = useRef<ReturnType<typeof setTimeout>>()
+  const loadGeneration = useRef(0)
   const [error, setError] = useState<string | null>(null)
   const [simulatorOpen, setSimulatorOpen] = useState(false)
   const [auditViewOpen, setAuditViewOpen] = useState(false)
@@ -31,18 +35,36 @@ export default function App() {
   const detailRef = useRef<HTMLElement>(null)
   const queueRef = useRef<HTMLHeadingElement>(null)
   function loadAlerts() {
-    setLoading(true)
-    setError(null)
-    api.listAlerts()
-      .then((available) => setResults((current) => {
-        // A slow initial GET must not discard a scenario just created by the visitor.
-        const currentIds = new Set(current.map((r) => r.alert_id))
-        return [...current, ...available.filter((r) => !currentIds.has(r.alert_id))]
-      }))
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+    const generation = ++loadGeneration.current
+    clearTimeout(refreshTimer.current)
+    setLoading(true); setError(null); setRefreshPaused(false)
+    async function fetchAlerts(attempt: number) {
+      try {
+        const available = await api.listAlerts()
+        if (generation !== loadGeneration.current) return
+        setResults(current => {
+          const currentIds = new Set(current.map(r => r.alert_id))
+          return [...current, ...available.filter(r => !currentIds.has(r.alert_id))]
+        })
+        const pending = available.demoState === 'initializing'
+        setInitializing(pending); setLoading(false); setError(null)
+        if (pending && attempt < 5) refreshTimer.current = setTimeout(() => fetchAlerts(attempt + 1), 2000)
+        else if (pending) setRefreshPaused(true)
+      } catch (e) {
+        if (generation !== loadGeneration.current) return
+        setLoading(false); setInitializing(false)
+        if (attempt < 2) {
+          setError('Service unavailable; retrying the read request…')
+          refreshTimer.current = setTimeout(() => fetchAlerts(attempt + 1), 1000 * (attempt + 1))
+        } else setError(e instanceof Error ? e.message : 'Demo service unavailable.')
+      }
+    }
+    void fetchAlerts(0)
   }
-  useEffect(loadAlerts, [])
+  useEffect(() => {
+    loadAlerts()
+    return () => { ++loadGeneration.current; clearTimeout(refreshTimer.current) }
+  }, [])
   useEffect(() => {
     if (!initialSelectionDone.current && results.length > 0) {
       initialSelectionDone.current = true
@@ -101,7 +123,7 @@ export default function App() {
       <section className="demo-intro" aria-labelledby="intro-heading">
         <div className="intro-copy">
           <div className="section-heading"><h2 id="intro-heading">How it works</h2><span className="badge">Simulated data · Portfolio demo</span></div>
-          <p><strong>Rules assign priority and routing.</strong> <strong>AI explains</strong> when available; it never decides. <strong>Humans review</strong> and retain final control. Every action is recorded.</p>
+          <p><strong>Rules assign priority and routing.</strong> <strong>AI explains</strong> when available; it never decides. <strong>Humans review</strong> and retain final control. Every successful action is recorded.</p><p className="muted small">Shared synthetic demo history persists on server storage until an operator archives/resets it. Never enter real patient data.</p>
           <nav className="intro-links" aria-label="About this project">
             <a href="https://github.com/hsivasambu/clinical-alert-triage" target="_blank" rel="noopener noreferrer">Repository <span className="sr-only">(opens in a new tab)</span>↗</a>
             <a href="https://blog.harry-sivasambu.com/blog/clinical-alert-triage" target="_blank" rel="noopener noreferrer">Project blog <span className="sr-only">(opens in a new tab)</span>↗</a>
@@ -122,9 +144,10 @@ export default function App() {
           </div>
           <p className="muted small" role="status">{visibleResults.length} matching alerts. Sorting ties: alert time newest first, then alert ID. Age uses alert time; fixed samples are historical fixtures.</p>
           {results.length > 0 && visibleResults.length === 0 && <p className="empty-state" role="status">No alerts match these filters. Clear filters to see all alerts.</p>}
-          {loading && <div className="empty-state" role="status">Loading alerts…</div>}
+          {initializing && <div className="empty-state" role="status">Initializing demo alerts… {refreshPaused ? <><p>Automatic refresh paused after six checks. Retry to check again.</p><button className="button" onClick={loadAlerts}>Retry loading alerts</button></> : <p>Checking every two seconds while sample seeding finishes.</p>}</div>}
+          {loading && !initializing && <div className="empty-state" role="status">Loading alerts…</div>}
           {error && <div className="notice notice-error" role="alert"><p>Could not load alerts: {error}</p><button className="button" onClick={loadAlerts}>Retry loading alerts</button></div>}
-          {!loading && !error && results.length === 0 && <div className="empty-state"><h3>No alerts yet</h3><p>Create a simulated alert to explore the workflow.</p><a className="button button-primary" href="#quick-scenario">Choose an example</a></div>}
+          {!loading && !initializing && !error && results.length === 0 && <div className="empty-state"><h3>No alerts yet</h3><p>Create a simulated alert to explore the workflow.</p><a className="button button-primary" href="#quick-scenario">Choose an example</a></div>}
           {results.length > 0 && <AlertTable results={visibleResults} selectedId={selectedId} onSelect={selectAlert} />}
         </section>
         <section className="detail-pane" ref={detailRef} tabIndex={-1} aria-label="Selected alert">

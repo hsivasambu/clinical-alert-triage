@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       '/alerts': 'http://localhost:8000',
       '/audit': 'http://localhost:8000',
+      '/ready': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/meta': 'http://localhost:8000',
     },

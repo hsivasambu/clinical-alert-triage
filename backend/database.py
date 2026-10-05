@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,7 +42,7 @@ from models import (
     TriageResult,
 )
 
-DB_PATH = Path(__file__).parent / "audit.db"
+DB_PATH = Path(os.environ["DEMO_DB_PATH"]) if os.environ.get("DEMO_DB_PATH", "").strip() else Path(__file__).parent / "audit.db"
 logger = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -61,6 +62,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     final_response_json  TEXT     NOT NULL,
     created_at           TEXT     NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS alert_registry (alert_id TEXT PRIMARY KEY);
 
 CREATE TABLE IF NOT EXISTS review_events (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,12 +93,16 @@ CREATE TABLE IF NOT EXISTS feedback (
     created_at       TEXT     NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS overrides_alert_idx ON overrides(alert_id, id);
+CREATE INDEX IF NOT EXISTS feedback_alert_idx ON feedback(alert_id, id);
+
 CREATE TABLE IF NOT EXISTS acceptances (
     id           INTEGER  PRIMARY KEY AUTOINCREMENT,
     alert_id     TEXT     NOT NULL,
     reviewer_id  TEXT     NOT NULL,
     created_at   TEXT     NOT NULL
 );
+CREATE INDEX IF NOT EXISTS acceptances_alert_idx ON acceptances(alert_id, id);
 """
 
 
@@ -112,6 +119,7 @@ def init_db(db_path: Optional[Path] = None) -> None:
         for name, kind in [("decision_version", "INTEGER"), ("accepted_priority", "TEXT"), ("accepted_route", "TEXT")]:
             if name not in columns:
                 conn.execute(f"ALTER TABLE acceptances ADD COLUMN {name} {kind}")
+        conn.execute("INSERT OR IGNORE INTO alert_registry (alert_id) SELECT DISTINCT alert_id FROM audit_log")
         audit_columns = {r[1] for r in conn.execute("PRAGMA table_info(audit_log)")}
         if "fallback_reason" not in audit_columns:
             conn.execute("ALTER TABLE audit_log ADD COLUMN fallback_reason TEXT")
@@ -124,6 +132,36 @@ def init_db(db_path: Optional[Path] = None) -> None:
 # Triage logging
 # ---------------------------------------------------------------------------
 
+class DuplicateAlertError(ValueError):
+    pass
+
+
+class DemoCapacityError(RuntimeError):
+    pass
+
+
+def has_alert(alert_id: str, db_path: Optional[Path] = None) -> bool:
+    with sqlite3.connect(_db(db_path)) as conn:
+        return conn.execute("SELECT 1 FROM alert_registry WHERE alert_id = ?", (alert_id,)).fetchone() is not None
+
+
+
+def persisted_alert_count(db_path: Optional[Path] = None) -> int:
+    with sqlite3.connect(_db(db_path)) as conn:
+        return conn.execute("SELECT COUNT(*) FROM alert_registry").fetchone()[0]
+
+
+def check_alert_capacity(db_path: Optional[Path] = None) -> None:
+    with sqlite3.connect(_db(db_path)) as conn:
+        if conn.execute("SELECT COUNT(*) FROM alert_registry").fetchone()[0] >= max(1, int(os.environ.get("DEMO_MAX_ALERTS", "1000"))):
+            raise DemoCapacityError("Demo alert storage is full; an operator must archive/reset it.")
+
+
+def _check_review_capacity(conn) -> None:
+    total = sum(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("overrides", "feedback", "acceptances"))
+    if total >= max(1, int(os.environ.get("DEMO_MAX_REVIEW_RECORDS", "10000"))):
+        raise DemoCapacityError("Demo review storage is full; an operator must archive/reset it.")
+
 def log_triage(
     alert: AlertIn,
     rule_output: RuleOutput,
@@ -132,6 +170,13 @@ def log_triage(
 ) -> None:
     """Append one triage decision to the audit log."""
     with sqlite3.connect(_db(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT 1 FROM alert_registry WHERE alert_id = ?", (alert.alert_id,)).fetchone():
+            raise DuplicateAlertError(alert.alert_id)
+        capacity = max(1, int(os.environ.get("DEMO_MAX_ALERTS", "1000")))
+        if conn.execute("SELECT COUNT(*) FROM alert_registry").fetchone()[0] >= capacity:
+            raise DemoCapacityError("Demo alert storage is full; an operator must archive/reset it.")
+        conn.execute("INSERT INTO alert_registry (alert_id) VALUES (?)", (alert.alert_id,))
         conn.execute(
             """
             INSERT INTO audit_log (
@@ -214,6 +259,8 @@ def log_override(
     """Append an override action and return the persisted record."""
     now = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(_db(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _check_review_capacity(conn)
         cur = conn.execute(
             """
             INSERT INTO overrides (
@@ -291,6 +338,8 @@ def log_feedback(
     """Append explanation quality feedback and return the persisted record."""
     now = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(_db(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _check_review_capacity(conn)
         cur = conn.execute(
             """
             INSERT INTO feedback (
@@ -361,6 +410,7 @@ def log_acceptance(
     now = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(_db(db_path)) as conn:
         conn.execute("BEGIN IMMEDIATE")
+        _check_review_capacity(conn)
         state = get_review_state(alert_id, triage_result, db_path) if triage_result else None
         if state and acceptance_in.decision_version is not None and acceptance_in.decision_version != state.decision_version:
             raise ValueError("Decision changed; refresh before accepting.")
@@ -440,24 +490,19 @@ def get_audit_log(
         conditions.append("al.explanation_mode = ?")
         params.append(explanation_mode)
 
+    if overridden_only: conditions.append("EXISTS (SELECT 1 FROM overrides o WHERE o.alert_id = al.alert_id)")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    having = "HAVING override_count > 0" if overridden_only else ""
     params.append(limit)
 
     query = f"""
         SELECT
             al.*,
-            COUNT(DISTINCT o.id)  AS override_count,
-            COUNT(DISTINCT f.id)  AS feedback_count,
-            COUNT(DISTINCT ac.id) AS acceptance_count
+            (SELECT COUNT(*) FROM overrides o WHERE o.alert_id = al.alert_id) AS override_count,
+            (SELECT COUNT(*) FROM feedback f WHERE f.alert_id = al.alert_id) AS feedback_count,
+            (SELECT COUNT(*) FROM acceptances ac WHERE ac.alert_id = al.alert_id) AS acceptance_count
         FROM audit_log al
-        LEFT JOIN overrides   o  ON al.alert_id = o.alert_id
-        LEFT JOIN feedback    f  ON al.alert_id = f.alert_id
-        LEFT JOIN acceptances ac ON al.alert_id = ac.alert_id
         {where}
-        GROUP BY al.id
-        {having}
-        ORDER BY al.created_at DESC
+        ORDER BY al.created_at DESC, al.id DESC
         LIMIT ?
     """
     with sqlite3.connect(_db(db_path)) as conn:

@@ -132,15 +132,16 @@ def _confidence_cap(alert: AlertIn) -> float:
 
 def is_enabled() -> bool:
     """Return True when OPENAI_API_KEY is set in the environment."""
-    return bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    return os.environ.get("LLM_ENABLED", "true").lower() not in {"false", "0", "no"} and bool(os.environ.get("OPENAI_API_KEY", "").strip())
 
 
-def explain_with_outcome(alert: AlertIn, rule_output: RuleOutput, correlation_id: str | None = None) -> LLMOutcome:
+def explain_with_outcome(alert: AlertIn, rule_output: RuleOutput, correlation_id: str | None = None, *, allow_provider: bool = True) -> LLMOutcome:
     metadata = generation_metadata(alert, rule_output, correlation_id)
     metadata.configured_model = _MODEL
     start = time.perf_counter()
     output, reason = None, None
-    if not is_enabled():
+    enabled = allow_provider and is_enabled()
+    if not enabled:
         reason = "llm_disabled"
         metadata.validation_outcome = "not_attempted"
     else:
@@ -160,7 +161,7 @@ def explain_with_outcome(alert: AlertIn, rule_output: RuleOutput, correlation_id
             reason = "provider_failure"
             metadata.validation_outcome = "provider_error"
     metadata.fallback_reason = reason
-    metadata.generation_duration_ms = round((time.perf_counter() - start) * 1000, 3) if is_enabled() else 0.0
+    metadata.generation_duration_ms = round((time.perf_counter() - start) * 1000, 3) if enabled else 0.0
     return LLMOutcome(output=output, fallback_reason=reason, provenance=metadata)
 
 

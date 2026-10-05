@@ -48,3 +48,11 @@ def make_alert(
 def disable_external_llm(monkeypatch):
     """Default to offline explanations; LLM unit tests explicitly install mocks."""
     monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    import openai
+    def offline_provider(**kwargs):
+        raise AssertionError("External LLM calls are disabled in tests; install a provider mock.")
+    monkeypatch.setattr(openai, "OpenAI", offline_provider)
+    if "main" in sys.modules:
+        sys.modules["main"].demo_limits.reset()
+        sys.modules["main"]._initialization.update(state="ready", seed_failures=0)

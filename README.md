@@ -423,3 +423,54 @@ Every new triage record carries provenance in detail, full audit and audit-list 
 Expanded audit rows load a chronological history: original system decision, timestamped review actions with reviewer/reason, acceptance version/snapshot, and separately labeled current effective decision. New actions receive a transactional, append-only cross-action sequence for tied timestamps. Legacy equal-time actions use stable type/ID ordering and explicitly disclose that the actual relative order is unknown. Feedback does not change the decision. Original JSON remains immutable across overrides and acceptances.
 
 Focused contract and persistence tests mock providers and cover incorrect measurements/units, missing observations, references, prohibited content, contradictions, blank text/items, caps, returned model identity, correlation IDs, restart persistence, old records and cross-action history. UI tests cover chronological rendering, legacy labels, deterministic context values, confidence wording, and audit read failure/retry. All backend tests default to external LLM calls disabled.
+
+
+## Offline verification, CI and synthetic evaluation
+
+The repository-root `pytest.ini` sets the backend test path and asyncio fixture scope. Every backend test starts with a blank API key and a provider factory that blocks unmocked LLM calls. Provider-path tests install explicit local mocks. `LLM_ENABLED=false` disables live generation even if a key exists. Default sample seeding always uses rules-only explanations; a key cannot make cold-start seeding wait for six providers. User-submitted simulations can opt into explanation generation through the deployment environment, subject to budgets below.
+
+From the repository root:
+
+```powershell
+.\backend\venv\Scripts\python.exe -m pytest -q --basetemp=.test-tmp-verification
+.\backend\venv\Scripts\python.exe backend/evaluate_demo.py --check
+.\backend\venv\Scripts\python.exe backend/evaluate_demo.py --report docs/evaluation-report.md
+```
+
+From `frontend/`: `npm ci`, `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:browser` verify the frontend and mocked API/layout regressions. `npm run test:integration` starts a **real isolated FastAPI + SQLite** server on 127.0.0.1:8011 and Vite on 127.0.0.1:5175; it disables the provider, uses temporary synthetic history, and tests scenario submission, all six explanation sections, accept/override, chronological audit history, browser refresh persistence, duplicate submission, and Critical-to-High switching during an override draft. Backend tests separately verify process-start reload from persisted SQLite. No production DB is reset by tests. On Windows set `$env:DEMO_TEST_PYTHON` to the backend virtual environment's absolute `python.exe` path. Installed Edge is the local browser; CI sets `PLAYWRIGHT_BROWSER=chromium` and installs Playwright Chromium. Free both local ports before running integration checks.
+
+GitHub Actions `.github/workflows/verify.yml` runs backend tests and offline evaluation; frontend type checking, component tests and build; and the small real API integration suite on Ubuntu. It uses Python 3.11/Node 20 and no provider key. Failure artifacts are uploaded. Hosted CI must still execute after pushing; a local successful run does not prove that the hosted runner or deployment succeeded.
+
+The checked-in [evaluation report](docs/evaluation-report.md) and [machine-readable results](docs/evaluation-results.json) cover **60 distinct synthetic alerts, eight invalid inputs, 17 mocked model fixtures and 1,020 pipeline combinations**. Mechanical schema/evidence/fallback metrics are defined separately from human narrative quality. The adversarial limitation probe intentionally exposes an accepted unsupported nonnumeric claim. Repeated templates are correlated samples, not independent live-model trials. **No human-rated quality score or clinical reliability score is reported.** Report hashes normalize dataset newlines for cross-platform reproducibility.
+
+## Initialization, timeouts and request retry policy
+
+`GET /health` remains liveness-only. `GET /ready` returns `initializing` (202), `ready` (200), or `unavailable` (503), plus alert and seed-failure counts. `GET /alerts` keeps its compatible array response, exposes `X-Demo-State`, and returns 503 on unavailable initialization/storage. A ready empty array means no alerts exist; an initializing empty array means fixtures are still being persisted. Partially initialized queues remain usable. A seed failure or wholly unreadable persisted history with no usable alerts is unavailable, not a successfully empty demo; partial seed failures are exposed in readiness.
+
+The frontend checks initialization every two seconds, at most six reads, then displays a paused initialization state and a manual Retry action. Failed reads retry at most twice (after one and two seconds), then show unavailable/error with manual Retry. Selection and newly submitted examples survive startup polling. Cleanup cancels polling when the component unmounts, and stale responses from older refresh attempts are ignored. Requests abort after 10 seconds for reads or 25 seconds for writes. Initialization polling can therefore take up to roughly 70 seconds if each read reaches its timeout, although failed reads use the shorter three-attempt failure path. **Writes are never automatically retried**: a client timeout/disconnect does not prove that the server failed to commit. Read the queue/audit history before resubmitting. An audit refresh failure after a known successful save still clearly says the action was saved.
+
+## Public simulation budgets and retention
+
+These defaults apply to POST simulation/review requests, with environment overrides in `backend/demo.env.example`:
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| `DEMO_MAX_REQUEST_BYTES` | 16,384 bytes | 413 before JSON validation; enforced for Content-Length and streamed/chunked bodies |
+| Request-body receive deadline | 10 seconds total | 408 for slow/stalled uploads |
+| `DEMO_WRITES_PER_MINUTE` | 20 per client address | Sliding 60-second window; 429 with Retry-After |
+| `DEMO_GLOBAL_WRITES_PER_MINUTE` | 120 per process | Shared sliding write budget; rejected/oversized admitted requests consume their rate budget |
+| `DEMO_WRITE_CONCURRENCY` | 2 | Busy writes receive 429 instead of an unbounded provider-work queue |
+| `DEMO_MAX_ALERTS` | 1,000 stored alert IDs | 503 at capacity; existing alerts/audit remain readable |
+| `DEMO_MAX_REVIEW_RECORDS` | 10,000 combined overrides/acceptances/feedback | 503 at capacity; prior history stays intact |
+
+Rate counters are bounded to 1,024 active client addresses. They use the ASGI peer address, not an application-parsed arbitrary forwarded header. Configure the server/proxy's trusted forwarding behavior correctly; users behind shared NAT may share a budget. **This is a single-process portfolio budget, not distributed abuse prevention, authentication or guaranteed cost control.** Run one backend worker while using the in-memory queue and these counters. Multi-worker/multi-instance deployments require a shared cache/limiter and database-backed queue reads. Configure reverse-proxy request size/timeouts, trusted proxy addresses and provider billing limits separately for a public host. Reviewer names are public, user-entered demo labels, not verified clinician identities.
+
+Triage records commit to SQLite **before** entering the visible memory store. An append-only `alert_registry` transaction reserves each persisted alert ID, including existing historical IDs migrated without rewriting their audit rows. Concurrent duplicate IDs receive 409; failed inserts roll back the reservation and do not publish an unaudited in-memory decision. Storage failures return 503; retry a failed alert with the **same ID** after checking history. The process also rejects IDs currently generating to avoid redundant provider work. Human actions and their cross-action event sequence commit together. Capacity checks are transactional. Review lookups use alert indexes, and audit counts use separate indexed counts instead of multiplying override/feedback/acceptance rows in a join. Database writes are not silently replaced with memory-only success.
+
+There is **no automatic deletion, TTL, or public reset endpoint**. Shared simulated alerts and review history remain until an operator archives/resets the server database or the host loses ephemeral storage. Restarts with a persistent disk reload original decisions and reviews. An empty database seeds the six deterministic fixtures unless `SEED_SAMPLE_DATA=false`; browser refresh never deletes history. Do not submit real patient information or sensitive reviewer details. Capacity budgets prevent continued accumulation beyond the documented counts but are not database byte-size quotas.
+
+For a reset, stop the single backend process, archive the SQLite database to a timestamped backup using the actual configured path (default `backend/audit.db`), then restart. Also preserve any SQLite `-wal`/`-shm` files if present; use SQLite's backup API when backing up a running process. A reset starts a new demo history while preserving the archived original records; inspect/export needed history first. Do not remove a database while requests or seeding are active. Archives require their own operator retention/storage policy.
+
+### Deployment actions beyond a code push
+
+Redeploy the backend and frontend to serve the new API headers, request guards and startup UI. Use one backend worker; set `LLM_ENABLED=false` for the default fully offline demo; configure `ALLOWED_ORIGINS`; and optionally set `DEMO_DB_PATH` to an absolute path on a writable mounted persistent disk whose parent directory already exists. Without a persistent mount, a platform restart/redeploy may reset all shared history. Configure `/ready` as the readiness probe and `/health` as liveness; verify the host accepts 202 while initialization is pending or waits for 200. Review provider and proxy limits before enabling live explanations. Code changes do not provision a disk, change hosting settings, guarantee a hosted CI result, or reset the deployed database.

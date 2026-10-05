@@ -1,0 +1,64 @@
+{
+  "dataset_version": "synthetic-v1",
+  "dataset_sha256": "9f5e828269e36d8548dd2afaa74a99c24e89d74ea2e8fc7c2899d2c7cada098f",
+  "rules_version": "rules-v1-sha256:0236b7c72998ca97944ab6cccf811d4d7c681c2462f3a93325e5faf404693bf8",
+  "prompt_version": "explanation-contract-v2",
+  "validation_version": "evidence-contract-v1",
+  "sample_sizes": {
+    "distinct_alerts": 60,
+    "invalid_inputs": 8,
+    "model_fixtures": 17
+  },
+  "by_alert_type": {
+    "tachycardia": 12,
+    "low_spo2": 11,
+    "infusion_pump": 11,
+    "nurse_call": 6,
+    "fall_risk": 7,
+    "sepsis": 13
+  },
+  "tags": {
+    "boundary": 29,
+    "missing": 15,
+    "repeat": 12,
+    "noisy": 6,
+    "routing": 5,
+    "alarm": 5,
+    "combined": 2,
+    "adversarial_input": 1
+  },
+  "metrics": {
+    "pipeline_runs": 1020,
+    "decision_authority_preserved": 1020,
+    "final_schema_valid": 1020,
+    "fallback_expectation_matched": 1020,
+    "fallback_records": 900,
+    "complete_fallback_records": 900,
+    "provider_schema_attempted": 840,
+    "provider_schema_valid": 600,
+    "hybrid_records": 120,
+    "hybrid_passes_mechanical_evidence_checks": 120,
+    "adversarial_runs": 480,
+    "adversarial_rejected": 420,
+    "known_unsupported_claims_accepted": 60,
+    "invalid_input_cases": 8,
+    "invalid_inputs_rejected": 8
+  },
+  "fallback_counts": {
+    "llm_disabled": 60,
+    "hybrid": 120,
+    "low_confidence": 60,
+    "provider_failure": 60,
+    "provider_timeout": 60,
+    "malformed_output": 60,
+    "schema_invalid": 180,
+    "evidence_mismatch": 120,
+    "contradiction": 120,
+    "content_rejected": 180
+  },
+  "expectation_failures": [],
+  "manual_narrative_quality": {
+    "assessed_by_human": 0,
+    "status": "Not assessed; see rubric. No automatic clinical-quality or reliability score."
+  }
+}

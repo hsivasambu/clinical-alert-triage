@@ -21,3 +21,5 @@ frontend/playwright-results/
 .test-tmp-*/
 .pytest-review-*/
 pytest-cache-files-*/
+
+frontend/playwright-results-integration/

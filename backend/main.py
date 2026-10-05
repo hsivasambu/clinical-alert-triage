@@ -15,8 +15,8 @@ Endpoints:
     GET  /audit                     Audit log with filters (newest first)
     GET  /health                    Health check
 
-LLM explainability is active when OPENAI_API_KEY is set in the environment.
-Without it the system runs in rules_only mode — all endpoints remain functional.
+LLM explainability is active when OPENAI_API_KEY is set and LLM_ENABLED is not false.
+Without it the system runs in rules_only mode. Startup fixtures always run offline.
 
 Safety contract (enforced in decision_layer.py):
   - Rules define the minimum severity floor; LLM cannot downgrade critical alerts.
@@ -31,6 +31,8 @@ import json
 import logging
 import os
 import re
+import sqlite3
+from threading import Lock, Event
 from uuid import uuid4
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -40,7 +42,7 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -48,6 +50,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 import database
+from demo_limits import DemoLimits, DemoLimitMiddleware
 import decision_layer
 import llm_explainer
 import rules_engine
@@ -76,44 +79,79 @@ _SEED_FILES = [
 _SAMPLE_DIR = Path(__file__).parent.parent / "sample_data"
 
 
-def _seed_sample_data() -> None:
-    """Populate the store with sample alerts when the database is empty."""
+_initialization = {"state": "ready", "seed_failures": 0}
+_store_lock = Lock()
+_inflight: set[str] = set()
+_seed_stop = Event()
+
+
+def _persist_alert(alert: AlertIn, correlation: str | None = None, *, allow_provider=True) -> TriageResult:
+    with _store_lock:
+        if alert.alert_id in _store or alert.alert_id in _inflight or database.has_alert(alert.alert_id):
+            raise database.DuplicateAlertError(alert.alert_id)
+        database.check_alert_capacity()
+        _inflight.add(alert.alert_id)
+    try:
+        rules = rules_engine.evaluate(alert)
+        outcome = llm_explainer.explain_with_outcome(alert, rules, correlation, allow_provider=allow_provider)
+        result = decision_layer.apply(alert, rules, outcome)
+        database.log_triage(alert, rules, result)  # Commit before publishing to memory.
+        with _store_lock: _store[alert.alert_id] = result
+        return result
+    finally:
+        with _store_lock: _inflight.discard(alert.alert_id)
+
+
+def _seed_sample_data() -> int:
+    """Deterministic offline fixtures; provider latency cannot delay startup."""
+    failures = 0
     for filename in _SEED_FILES:
-        path = _SAMPLE_DIR / filename
-        if not path.exists():
-            continue
+        if _seed_stop.is_set(): break
         try:
-            alert = AlertIn(**json.loads(path.read_text()))
-            if alert.alert_id in _store:
-                continue
-            rule_output = rules_engine.evaluate(alert)
-            llm_output = llm_explainer.explain_with_outcome(alert, rule_output)
-            result = decision_layer.apply(alert, rule_output, llm_output=llm_output)
-            _store[alert.alert_id] = result
-            database.log_triage(alert, rule_output, result)
-        except Exception as exc:
-            logger.warning("Skipping seed file %s: %s", filename, exc)
+            alert = AlertIn.model_validate_json((_SAMPLE_DIR / filename).read_text(encoding="utf-8"))
+            _persist_alert(alert, allow_provider=False)
+        except database.DuplicateAlertError:
+            pass
+        except Exception:
+            failures += 1
+            logger.exception("Could not persist seed fixture %s", filename)
+    return failures
+
+
+async def _initialize_samples():
+    try:
+        failures = await asyncio.to_thread(_seed_sample_data)
+        _initialization.update(state="unavailable" if failures and not _store else "ready", seed_failures=failures)
+    except Exception:
+        _initialization.update(state="unavailable", seed_failures=len(_SEED_FILES))
+        logger.exception("Sample initialization failed")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    database.init_db()
-    _store.clear()
-    for result in database.load_triage_results():
-        _store[result.alert_id] = result
-    if not _store:
-        # Seeding calls the LLM explainer once per sample alert (up to a 15s
-        # timeout each when OPENAI_API_KEY is set). Running that inline here,
-        # before `yield`, would block the ASGI app — including /health — from
-        # accepting any request until all sample alerts finish. On a host
-        # with an ephemeral filesystem this reseed happens on every cold
-        # start, so a slow/unreachable LLM provider would make the whole app
-        # (not just the LLM path) appear down right when a monitor or user
-        # hits it after idle. Run it in the background instead so the app is
-        # reachable immediately; seeded alerts simply appear a few seconds
-        # later.
-        asyncio.create_task(asyncio.to_thread(_seed_sample_data))
-    yield
+    task = None
+    _seed_stop.clear()
+    _initialization.update(state="initializing", seed_failures=0)
+    try:
+        database.init_db()
+        with _store_lock:
+            _store.clear(); _inflight.clear()
+            for result in database.load_triage_results(): _store[result.alert_id] = result
+        if not _store and database.persisted_alert_count() > 0:
+            _initialization["state"] = "unavailable"
+            logger.error("Persisted audit rows exist but no usable decisions could be restored")
+        elif not _store and os.environ.get("SEED_SAMPLE_DATA", "true").lower() not in {"false", "0", "no"}:
+            task = asyncio.create_task(_initialize_samples())
+        else: _initialization["state"] = "ready"
+    except sqlite3.Error:
+        _initialization["state"] = "unavailable"
+        logger.exception("Demo storage initialization failed")
+    try: yield
+    finally:
+        _seed_stop.set()
+        if task:
+            await task  # Offline seeding has no external provider wait.
+
 
 
 app = FastAPI(
@@ -128,13 +166,16 @@ _extra = os.environ.get("ALLOWED_ORIGINS", "")
 if _extra:
     _cors_origins.extend(o.strip() for o in _extra.split(",") if o.strip())
 
+demo_limits = DemoLimits()
+app.add_middleware(DemoLimitMiddleware, limits=demo_limits)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID"],
+    expose_headers=["X-Request-ID", "X-Demo-State", "Retry-After"],
 )
 
 @app.middleware("http")
@@ -172,25 +213,26 @@ def triage_alert(alert: AlertIn, request: Request = None) -> TriageResult:
 
     Returns 409 if alert_id has already been processed.
     """
-    if alert.alert_id in _store:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Alert '{alert.alert_id}' has already been processed.",
-        )
-
-    rule_output = rules_engine.evaluate(alert)
-    llm_output = llm_explainer.explain_with_outcome(alert, rule_output, getattr(request.state, "correlation_id", None) if request else None)
-    result = decision_layer.apply(alert, rule_output, llm_output=llm_output)
-
-    _store[alert.alert_id] = result
-    database.log_triage(alert, rule_output, result)
-    return result
+    if _initialization["state"] == "unavailable":
+        raise HTTPException(503, "Demo storage is unavailable. Retry later.")
+    try:
+        return _persist_alert(alert, getattr(request.state, "correlation_id", None) if request else None)
+    except database.DuplicateAlertError:
+        raise HTTPException(409, f"Alert '{alert.alert_id}' has already been processed or is processing.") from None
+    except database.DemoCapacityError as exc:
+        raise HTTPException(503, str(exc)) from None
+    except sqlite3.Error:
+        logger.exception("Triage persistence failed")
+        raise HTTPException(503, "Decision could not be saved to the audit database. No alert was published; retry with the same alert ID.") from None
 
 
 @app.get("/alerts", response_model=List[TriageResult])
-def list_alerts() -> List[TriageResult]:
+def list_alerts(response: Response = None) -> List[TriageResult]:
     """Return all in-memory triage results, newest first."""
-    return [with_review(r) for r in sorted(_store.values(), key=lambda r: r.processed_at, reverse=True)]
+    if response is not None: response.headers["X-Demo-State"] = _initialization["state"]
+    if _initialization["state"] == "unavailable": raise HTTPException(503, "Demo initialization/storage unavailable.")
+    with _store_lock: results = list(_store.values())
+    return [with_review(r) for r in sorted(results, key=lambda r: (r.processed_at, r.alert_id), reverse=True)]
 
 
 @app.get("/alerts/{alert_id}", response_model=TriageResult)
@@ -318,3 +360,21 @@ def feedback_categories() -> List[str]:
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/ready")
+def readiness(response: Response):
+    if _initialization["state"] == "unavailable": response.status_code = 503
+    elif _initialization["state"] == "initializing": response.status_code = 202
+    return {**_initialization, "alert_count": len(_store)}
+
+
+@app.exception_handler(sqlite3.Error)
+async def storage_error(request, exc):
+    logger.error("Demo storage operation failed", exc_info=exc)
+    return JSONResponse(status_code=503, content={"detail": "Demo storage is unavailable. If this was a review action, reload its history before retrying; its commit status may be unknown."})
+
+
+@app.exception_handler(database.DemoCapacityError)
+async def capacity_error(request, exc):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})

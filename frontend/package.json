@@ -7,7 +7,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "test:integration": "playwright test --config playwright.integration.config.ts"
   },
   "dependencies": {
     "react": "^18.3.1",
