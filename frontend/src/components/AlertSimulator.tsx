@@ -208,6 +208,7 @@ export function AlertSimulator({ onResult, onClose }: Props) {
           </FormSection>
 
           <FormSection title="Vital Signs">
+            <p className="muted small">Leave unavailable measurements blank. Blank values are not interpreted as normal.</p>
             <FieldRow>
               <Field label="Heart Rate (bpm)">
                 <input className="simulator-input" type="number" value={form.heart_rate} onChange={(e) => set('heart_rate', e.target.value)} placeholder="e.g. 95" />

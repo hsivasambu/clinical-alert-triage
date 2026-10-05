@@ -60,7 +60,11 @@ export interface AlertIn {
   additional_context: Record<string, unknown>
 }
 
+export type FallbackReason = 'llm_disabled' | 'provider_failure' | 'provider_timeout' | 'malformed_output' | 'schema_invalid' | 'low_confidence' | 'content_rejected' | 'not_supplied'
+
 export interface RuleOutput {
+  missing_fields?: string[]
+  evaluation_status?: 'matched' | 'no_rule_matched' | null
   baseline_priority: Priority
   matched_rules: string[]
   suggested_route: string
@@ -68,6 +72,9 @@ export interface RuleOutput {
 }
 
 export interface ExplanationOutput {
+  fallback_reason?: FallbackReason | null
+  explanation_version?: string | null
+  rule_evidence?: { rule_id: string; condition: string }[]
   summary: string
   rationale: string
   factors_considered: string[]
@@ -86,7 +93,7 @@ export interface TriageResult {
   final_priority: Priority
   final_route: string
   processed_at: string
-  review_state?: ReviewState
+  review_state?: ReviewState | null
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +108,7 @@ export interface OverrideIn {
 }
 
 export interface OverrideRecord {
-  review_state?: ReviewState
+  review_state?: ReviewState | null
   id: number
   alert_id: string
   reviewer_id: string
@@ -134,7 +141,7 @@ export interface AcceptanceRecord {
   decision_version: number | null
   accepted_priority: Priority | null
   accepted_route: string | null
-  review_state?: ReviewState
+  review_state?: ReviewState | null
   id: number
   alert_id: string
   reviewer_id: string
@@ -150,6 +157,7 @@ export interface AlertAudit {
 }
 
 export interface AuditLogEntry {
+  fallback_reason?: FallbackReason | null
   id: number
   alert_id: string
   alert_type: AlertType

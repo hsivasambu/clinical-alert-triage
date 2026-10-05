@@ -40,6 +40,8 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +85,7 @@ def _seed_sample_data() -> None:
             if alert.alert_id in _store:
                 continue
             rule_output = rules_engine.evaluate(alert)
-            llm_output = llm_explainer.explain(alert, rule_output)
+            llm_output = llm_explainer.explain_with_outcome(alert, rule_output)
             result = decision_layer.apply(alert, rule_output, llm_output=llm_output)
             _store[alert.alert_id] = result
             database.log_triage(alert, rule_output, result)
@@ -140,6 +142,16 @@ _store: Dict[str, TriageResult] = {}
 # Alert endpoints
 # ---------------------------------------------------------------------------
 
+@app.exception_handler(RequestValidationError)
+async def validation_error_response(request, exc: RequestValidationError):
+    # Avoid reflecting raw invalid inputs (including NaN/Infinity) or exception
+    # objects into JSON. Location/type/message are sufficient for form feedback.
+    return JSONResponse(status_code=422, content={"detail": [
+        {"type": error["type"], "loc": error["loc"], "msg": error["msg"]}
+        for error in exc.errors()
+    ]})
+
+
 @app.post("/alerts", response_model=TriageResult, status_code=201)
 def triage_alert(alert: AlertIn) -> TriageResult:
     """
@@ -155,7 +167,7 @@ def triage_alert(alert: AlertIn) -> TriageResult:
         )
 
     rule_output = rules_engine.evaluate(alert)
-    llm_output = llm_explainer.explain(alert, rule_output)
+    llm_output = llm_explainer.explain_with_outcome(alert, rule_output)
     result = decision_layer.apply(alert, rule_output, llm_output=llm_output)
 
     _store[alert.alert_id] = result

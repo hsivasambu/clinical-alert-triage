@@ -1,3 +1,4 @@
+import { fallbackLabel } from '../fallbackLabels'
 import { ALERT_TYPE_LABELS } from '../simulator/presets'
 import { isHistoricalFixture } from '../queue'
 import { VITAL_LABELS } from '../observations'
@@ -32,7 +33,7 @@ export function AlertDetail({ result, audit, reviewerId, onReviewerIdChange, onA
         <h3>Additional context</h3>{Object.keys(alert.additional_context).length ? <pre>{JSON.stringify(alert.additional_context, null, 2)}</pre> : <p className="muted">None provided.</p>}
       </details>
       <details className="panel disclosure"><summary>Technical details <span className="muted small">Rules & provenance</span></summary><dl className="metadata">
-        <Row label="Original system priority" value={final_priority} /><Row label="Original system route" value={final_route} /><Row label="Baseline priority" value={rule_output.baseline_priority} /><Row label="Rule suggested route" value={rule_output.suggested_route} /><Row label="Rule confidence" value={rule_output.rule_confidence.toFixed(2)} /><Row label="Explanation mode" value={explanation.explanation_mode} /><Row label="LLM confidence" value={explanation.llm_confidence_estimate?.toFixed(2) ?? 'Not available'} /><Row label="Processing time" value={new Date(result.processed_at).toLocaleString()} /><Row label="Matched rule IDs" value={rule_output.matched_rules.join(', ') || 'No matched rules returned'} />
+        <Row label="Original system priority" value={final_priority} /><Row label="Original system route" value={final_route} /><Row label="Baseline priority" value={rule_output.baseline_priority} /><Row label="Rule suggested route" value={rule_output.suggested_route} /><Row label="Rule confidence" value={rule_output.rule_confidence.toFixed(2)} /><Row label="Explanation mode" value={explanation.explanation_mode} /><Row label="Rules-only reason" value={explanation.explanation_mode === 'rules_only' ? fallbackLabel(explanation.fallback_reason) : 'Not applicable: recorded AI narrative'} /><Row label="Explanation version" value={explanation.explanation_version ?? 'Not recorded'} /><Row label="LLM confidence" value={explanation.llm_confidence_estimate?.toFixed(2) ?? 'Not available'} /><Row label="Processing time" value={new Date(result.processed_at).toLocaleString()} /><Row label="Matched rule IDs" value={rule_output.matched_rules.join(', ') || 'No matched rules returned'} />
       </dl></details>
     </div>
   </article>

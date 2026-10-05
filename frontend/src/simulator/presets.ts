@@ -99,7 +99,7 @@ export const PRESETS: Record<AlertType, PresetFields> = {
     blood_pressure_systolic: '128',
     blood_pressure_diastolic: '78',
     admission_reason: 'Post-op care',
-    additional_context: JSON.stringify({ drug: 'heparin', rate_ml_hr: 20, line: 'central' }, null, 2),
+    additional_context: JSON.stringify({ alarm_type: 'occlusion', infusate: 'heparin', rate_ml_hr: 20, line: 'central' }, null, 2),
   },
   nurse_call: {
     ...BASE,

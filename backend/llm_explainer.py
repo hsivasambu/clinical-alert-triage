@@ -1,25 +1,9 @@
-"""
-LLM Explainability Layer (Layer 3).
+"""Optional narrative provider. Structured outcomes retain fallback provenance.
 
-Public API:
-    is_enabled() -> bool          True when OPENAI_API_KEY is set.
-    explain(alert, rule_output)   Returns LLMRawOutput on success, None on any failure.
-
-Fallback contract:
-    None is returned — and must be handled as rules_only mode — in every case where:
-      - OPENAI_API_KEY is absent
-      - The API call times out or raises any error
-      - The response is not parseable JSON
-      - The JSON does not match the required schema (missing / wrong-type fields)
-      - confidence is below CONFIDENCE_THRESHOLD (handled downstream in decision_layer)
-
-    The system remains fully functional with llm_output=None.
-    decision_layer.apply() treats None as rules_only and never degrades the priority floor.
-
-Safety constraints (enforced here and in decision_layer):
-    - LLMRawOutput has NO priority or routing fields — the LLM cannot touch those.
-    - rule_trace is always set by decision_layer from rule_output, never by the LLM.
-    - No clinical diagnosis or treatment content is solicited by the prompts.
+explain_with_outcome() is the API pipeline entry point; explain() remains an
+optional-output compatibility helper for callers that do not persist provenance.
+Provider refusals/content-filter finishes are recognized; no semantic clinical
+content classifier is claimed. Raw failures/provider payloads are not returned.
 """
 
 from __future__ import annotations
@@ -27,11 +11,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Optional
+from dataclasses import dataclass
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
-from models import AlertIn, RuleOutput
+from models import AlertIn, FallbackReason, RuleOutput
 from prompt_builder import build_messages
 
 logger = logging.getLogger(__name__)
@@ -49,23 +34,28 @@ _MODEL               = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 # LLM output schema
 # ---------------------------------------------------------------------------
 
+NonEmptyText = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
+
 class LLMRawOutput(BaseModel):
-    """
-    Validated shape of the LLM's JSON response.
+    model_config = ConfigDict(extra="forbid")
+    summary: NonEmptyText
+    rationale: NonEmptyText
+    factors_considered: list[NonEmptyText] = Field(min_length=1)
+    uncertainty_notes: NonEmptyText
+    recommended_checks: list[NonEmptyText] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0, strict=True, allow_inf_nan=False)
 
-    All fields are required and must be non-empty.  Pydantic rejects any
-    response that is missing a field or violates the constraints, triggering
-    fallback to rules_only mode.
 
-    Intentionally has NO priority, routing, or diagnosis fields —
-    the LLM has no authority over those.
-    """
-    summary:              str        = Field(min_length=1)
-    rationale:            str        = Field(min_length=1)
-    factors_considered:   list[str]  = Field(min_length=1)
-    uncertainty_notes:    str        = Field(min_length=1)
-    recommended_checks:   list[str]  = Field(min_length=1)
-    confidence:           float      = Field(ge=0.0, le=1.0)
+@dataclass(frozen=True)
+class LLMOutcome:
+    output: Optional[LLMRawOutput] = None
+    fallback_reason: Optional[FallbackReason] = None
+
+
+class LLMFallbackError(Exception):
+    def __init__(self, reason: FallbackReason):
+        self.reason = reason
+        super().__init__(reason)
 
 
 def _confidence_cap(alert: AlertIn) -> float:
@@ -101,7 +91,7 @@ def _confidence_cap(alert: AlertIn) -> float:
 
     additional_values = {
         str(v).lower()
-        for v in alert.additional_context.values()
+        for v in alert.additional_context.model_dump().values()
         if isinstance(v, (str, int, float, bool))
     }
     noisy_markers = {
@@ -133,106 +123,68 @@ def _confidence_cap(alert: AlertIn) -> float:
 
 def is_enabled() -> bool:
     """Return True when OPENAI_API_KEY is set in the environment."""
-    return bool(os.environ.get("OPENAI_API_KEY"))
+    return bool(os.environ.get("OPENAI_API_KEY", "").strip())
+
+
+def explain_with_outcome(alert: AlertIn, rule_output: RuleOutput) -> LLMOutcome:
+    if not is_enabled():
+        return LLMOutcome(fallback_reason="llm_disabled")
+    try:
+        output = _call_llm(alert, rule_output)
+        return LLMOutcome(output=output, fallback_reason="low_confidence" if output.confidence < CONFIDENCE_THRESHOLD else None)
+    except LLMFallbackError as exc:
+        return LLMOutcome(fallback_reason=exc.reason)
+    except TimeoutError:
+        return LLMOutcome(fallback_reason="provider_timeout")
+    except Exception:
+        logger.warning("LLM provider failure for alert %s", alert.alert_id)
+        return LLMOutcome(fallback_reason="provider_failure")
 
 
 def explain(alert: AlertIn, rule_output: RuleOutput) -> Optional[LLMRawOutput]:
-    """
-    Call the LLM and return a validated LLMRawOutput, or None on any failure.
+    """Compatibility helper; use explain_with_outcome to retain failure reasons."""
+    return explain_with_outcome(alert, rule_output).output
 
-    Callers must treat None as rules_only — decision_layer.apply() does this
-    automatically when llm_output=None is passed.
-    """
-    if not is_enabled():
-        logger.debug("LLM disabled — OPENAI_API_KEY not set. Running in rules_only mode.")
-        return None
 
+def _call_llm(alert: AlertIn, rule_output: RuleOutput) -> LLMRawOutput:
     try:
-        return _call_llm(alert, rule_output)
-    except Exception as exc:
-        # Catch-all: any unhandled exception must not propagate to the API layer.
-        logger.warning(
-            "Unexpected error in LLM explainer for alert %s: %s: %s",
-            alert.alert_id, type(exc).__name__, exc,
-        )
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Internal implementation
-# ---------------------------------------------------------------------------
-
-def _call_llm(alert: AlertIn, rule_output: RuleOutput) -> Optional[LLMRawOutput]:
-    """
-    Build messages, call OpenAI, parse and validate the response.
-    Raises on unexpected errors — explain() catches everything.
-    """
-    # Lazy import: openai is only required at runtime when LLM is enabled.
-    # This lets the rest of the system import llm_explainer even without openai installed,
-    # which keeps rules_only mode functional without openai in requirements.
-    try:
-        from openai import OpenAI, OpenAIError
+        from openai import APITimeoutError, OpenAI, OpenAIError
     except ImportError:
-        logger.warning("openai package not installed. Running in rules_only mode.")
-        return None
-
+        raise LLMFallbackError("provider_failure") from None
     system_msg, user_msg = build_messages(alert, rule_output)
-
     try:
-        client = OpenAI(timeout=_REQUEST_TIMEOUT)
+        client = OpenAI(timeout=_REQUEST_TIMEOUT, max_retries=0)
         response = client.chat.completions.create(
             model=_MODEL,
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user",   "content": user_msg},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.2,  # low temperature for consistent, structured output
+            messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
+            response_format={"type": "json_object"}, temperature=0.2,
         )
-    except OpenAIError as exc:
-        logger.warning(
-            "OpenAI API error for alert %s: %s: %s",
-            alert.alert_id, type(exc).__name__, exc,
-        )
-        return None
-
-    raw_text = response.choices[0].message.content
-    if not raw_text or not raw_text.strip():
-        logger.warning("LLM returned empty content for alert %s", alert.alert_id)
-        return None
-
+    except (APITimeoutError, TimeoutError):
+        raise LLMFallbackError("provider_timeout") from None
+    except OpenAIError:
+        raise LLMFallbackError("provider_failure") from None
+    if not response.choices:
+        raise LLMFallbackError("malformed_output")
+    choice = response.choices[0]
+    refusal = getattr(choice.message, "refusal", None)
+    if (isinstance(refusal, str) and refusal.strip()) or choice.finish_reason == "content_filter":
+        raise LLMFallbackError("content_rejected")
+    raw_text = choice.message.content
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        raise LLMFallbackError("malformed_output")
     return _parse_and_validate(alert, raw_text)
 
 
-def _parse_and_validate(alert: AlertIn, raw_text: str) -> Optional[LLMRawOutput]:
-    """
-    Parse JSON and validate against LLMRawOutput schema.
-    Returns None (with a warning) on any parsing or validation failure.
-    """
+def _parse_and_validate(alert: AlertIn, raw_text: str) -> LLMRawOutput:
     try:
         data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        logger.warning("LLM returned malformed JSON for alert %s: %s", alert.alert_id, exc)
-        return None
-
-    if not isinstance(data, dict):
-        logger.warning(
-            "LLM response for alert %s is not a JSON object (got %s)",
-            alert.alert_id, type(data).__name__,
-        )
-        return None
-
+    except (json.JSONDecodeError, TypeError):
+        raise LLMFallbackError("malformed_output") from None
     try:
-        result = LLMRawOutput(**data)
-    except ValidationError as exc:
-        logger.warning(
-            "LLM output failed schema validation for alert %s: %s",
-            alert.alert_id, exc,
-        )
-        return None
-
+        result = LLMRawOutput.model_validate(data)
+    except ValidationError:
+        raise LLMFallbackError("schema_invalid") from None
     capped_confidence = min(result.confidence, _confidence_cap(alert))
     if capped_confidence != result.confidence:
         result = result.model_copy(update={"confidence": round(capped_confidence, 2)})
-
     return result

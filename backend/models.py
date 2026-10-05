@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+import math
+import re
+from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, StrictStr, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -46,41 +48,77 @@ PRIORITY_RANK: Dict[str, int] = {
 # ---------------------------------------------------------------------------
 
 class VitalSigns(BaseModel):
-    heart_rate:              Optional[float] = Field(None, description="Beats per minute")
-    spo2:                    Optional[float] = Field(None, description="Oxygen saturation (%)")
-    blood_pressure_systolic: Optional[float] = Field(None, description="Systolic mmHg")
-    blood_pressure_diastolic:Optional[float] = Field(None, description="Diastolic mmHg")
-    respiratory_rate:        Optional[float] = Field(None, description="Breaths per minute")
-    temperature:             Optional[float] = Field(None, description="Degrees Celsius")
+    # Broad demo ingestion bounds, not clinical reference ranges.
+    model_config = ConfigDict(extra="forbid")
+    heart_rate: Optional[float] = Field(None, ge=0, le=400, strict=True, allow_inf_nan=False)
+    spo2: Optional[float] = Field(None, ge=0, le=100, strict=True, allow_inf_nan=False)
+    blood_pressure_systolic: Optional[float] = Field(None, ge=0, le=400, strict=True, allow_inf_nan=False)
+    blood_pressure_diastolic: Optional[float] = Field(None, ge=0, le=300, strict=True, allow_inf_nan=False)
+    respiratory_rate: Optional[float] = Field(None, ge=0, le=100, strict=True, allow_inf_nan=False)
+    temperature: Optional[float] = Field(None, ge=0, le=60, strict=True, allow_inf_nan=False)
 
 
 class RecentContext(BaseModel):
-    """Structured patient context available at the time of the alert."""
-    prior_alerts_24h:   int        = Field(0,  ge=0, description="Alerts fired in the past 24 hours")
-    recent_medications: List[str]  = Field(default_factory=list, description="Medications given in the past 4 hours")
-    fall_risk_score:    Optional[int]  = Field(None, ge=0, description="Morse fall scale score or equivalent")
-    admission_reason:   Optional[str]  = None
-    code_status:        Optional[str]  = Field(None, description="e.g. 'full_code', 'dnr', 'dni'")
+    model_config = ConfigDict(extra="forbid")
+    prior_alerts_24h: int = Field(0, ge=0, le=1000000, strict=True)
+    recent_medications: List[StrictStr] = Field(default_factory=list)
+    fall_risk_score: Optional[int] = Field(None, ge=0, le=125, strict=True)
+    admission_reason: Optional[StrictStr] = None
+    code_status: Optional[StrictStr] = None
+
+
+class AdditionalContext(BaseModel):
+    """Known rule/router inputs are typed; other observed JSON metadata is retained."""
+    model_config = ConfigDict(extra="allow")
+    __pydantic_extra__: Dict[str, JsonValue] = Field(init=False)
+    alarm_type: Optional[StrictStr] = Field(None, max_length=100)
+    infusate: Optional[StrictStr] = Field(None, max_length=256)
+
+    @model_validator(mode="after")
+    def finite_metadata(self):
+        def check(value):
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError("additional metadata numbers must be finite JSON values")
+            if isinstance(value, dict):
+                for child in value.values(): check(child)
+            if isinstance(value, list):
+                for child in value: check(child)
+        check(self.model_dump())
+        return self
 
 
 class AlertIn(BaseModel):
-    alert_id:           str
-    source_system:      str            = Field(description="System or device that generated the alert")
-    alert_type:         AlertType
-    patient_id:         str
-    unit:               str
-    room:               Optional[str]  = None
-    bed:                Optional[str]  = None
-    timestamp:          datetime
-    vital_signs:        VitalSigns
-    message_text:       Optional[str]  = Field(None, description="Free-text message from the device or system")
-    device_type:        Optional[str]  = Field(None, description="e.g. 'cardiac_monitor', 'infusion_pump'")
-    repeat_count:       int            = Field(0, ge=0, description="Consecutive times this alert has fired")
-    recent_context:     RecentContext  = Field(default_factory=RecentContext)
-    additional_context: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Alert-type-specific extras not covered by structured fields (e.g. alarm_type for pumps)",
-    )
+    model_config = ConfigDict(extra="forbid")
+    alert_id: StrictStr = Field(min_length=1, max_length=128)
+    source_system: StrictStr = Field(min_length=1, max_length=256)
+    alert_type: AlertType
+    patient_id: StrictStr = Field(min_length=1, max_length=128)
+    unit: StrictStr = Field(min_length=1, max_length=256)
+    room: Optional[StrictStr] = None
+    bed: Optional[StrictStr] = None
+    timestamp: AwareDatetime
+    vital_signs: VitalSigns = Field(default_factory=VitalSigns)
+    message_text: Optional[StrictStr] = None
+    device_type: Optional[StrictStr] = None
+    repeat_count: int = Field(0, ge=0, le=1000000, strict=True)
+    recent_context: RecentContext = Field(default_factory=RecentContext)
+    additional_context: AdditionalContext = Field(default_factory=AdditionalContext)
+
+    @field_validator("alert_id", "source_system", "patient_id", "unit")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must contain non-whitespace characters")
+        return value
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def timestamp_format(cls, value):
+        if isinstance(value, (int, float, bool)):
+            raise ValueError("timestamp must be an ISO 8601 datetime with timezone, not an epoch number")
+        if isinstance(value, str) and not re.match(r"^\d{4}-\d{2}-\d{2}[Tt ]", value):
+            raise ValueError("timestamp must be an ISO 8601 datetime with timezone")
+        return value
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +127,8 @@ class AlertIn(BaseModel):
 
 class RuleOutput(BaseModel):
     """Output of the deterministic rules engine."""
+    missing_fields: List[str] = Field(default_factory=list)
+    evaluation_status: Optional[Literal["matched", "no_rule_matched"]] = None
     baseline_priority: Priority
     matched_rules:     List[str] = Field(description="IDs of every rule that fired — full audit trace")
     suggested_route:   str
@@ -99,28 +139,34 @@ class RuleOutput(BaseModel):
 # Layer 3 output — explainability schema
 # ---------------------------------------------------------------------------
 
-class ExplanationOutput(BaseModel):
-    """
-    Structured explainability schema populated by the decision layer.
+FallbackReason = Literal[
+    "llm_disabled", "provider_failure", "provider_timeout", "malformed_output",
+    "schema_invalid", "low_confidence", "content_rejected", "not_supplied",
+]
 
-    With no LLM active, all narrative fields carry documented placeholder values
-    and explanation_mode is 'rules_only'.  When llm_explainer.py is wired in,
-    the LLM replaces summary / rationale / factors_considered / uncertainty_notes
-    / recommended_checks and sets llm_confidence_estimate.
-    rule_trace and explanation_mode are always set by the decision layer,
-    never by the LLM.
+
+class RuleEvidence(BaseModel):
+    rule_id: str
+    condition: str
+
+
+class ExplanationOutput(BaseModel):
+    """Recorded narrative plus deterministic trace and optional LLM fallback reason.
+
+    Nullable provenance fields preserve legacy records without guessing why they
+    fell back or rewriting their original narrative.
     """
-    summary:                str             = "Alert triaged by rules engine only. LLM explanation not yet active."
-    rationale:              str             = ""
-    factors_considered:     List[str]       = Field(default_factory=list)
-    uncertainty_notes:      str             = ""
-    recommended_checks:     List[str]       = Field(default_factory=list)
-    llm_confidence_estimate:Optional[float] = Field(None, ge=0.0, le=1.0)
-    explanation_mode:       ExplanationMode = ExplanationMode.rules_only
-    rule_trace:             List[str]       = Field(
-        default_factory=list,
-        description="Matched rule IDs — always populated for audit traceability",
-    )
+    summary: str = ""
+    rationale: str = ""
+    factors_considered: List[str] = Field(default_factory=list)
+    uncertainty_notes: str = ""
+    recommended_checks: List[str] = Field(default_factory=list)
+    llm_confidence_estimate: Optional[float] = Field(None, ge=0.0, le=1.0)
+    explanation_mode: ExplanationMode = ExplanationMode.rules_only
+    rule_trace: List[str] = Field(default_factory=list)
+    rule_evidence: List[RuleEvidence] = Field(default_factory=list)
+    fallback_reason: Optional[FallbackReason] = None
+    explanation_version: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

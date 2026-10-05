@@ -106,6 +106,9 @@ def init_db(db_path: Optional[Path] = None) -> None:
         for name, kind in [("decision_version", "INTEGER"), ("accepted_priority", "TEXT"), ("accepted_route", "TEXT")]:
             if name not in columns:
                 conn.execute(f"ALTER TABLE acceptances ADD COLUMN {name} {kind}")
+        audit_columns = {r[1] for r in conn.execute("PRAGMA table_info(audit_log)")}
+        if "fallback_reason" not in audit_columns:
+            conn.execute("ALTER TABLE audit_log ADD COLUMN fallback_reason TEXT")
         conn.commit()
 
 
@@ -126,10 +129,10 @@ def log_triage(
             INSERT INTO audit_log (
                 alert_id, alert_type, patient_id, unit,
                 baseline_priority, final_priority, final_route, explanation_mode,
-                rule_confidence,
+                rule_confidence, fallback_reason,
                 alert_json, rule_output_json, final_response_json,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 alert.alert_id,
@@ -141,6 +144,7 @@ def log_triage(
                 result.final_route,
                 result.explanation.explanation_mode.value,
                 rule_output.rule_confidence,
+                result.explanation.fallback_reason,
                 alert.model_dump_json(),
                 rule_output.model_dump_json(),
                 result.model_dump_json(),

@@ -65,36 +65,20 @@ def _unit_is_icu(unit: str) -> bool:
 # Route resolution
 # ---------------------------------------------------------------------------
 
-def resolve_route(
-    alert: AlertIn,
-    baseline_priority: Priority,
-    rule_suggested_route: str,
-) -> str:
-    """
-    Refine the rules engine's suggested route using unit type and patient context.
-
-    Precedence (highest → lowest):
-      1. Critical in ICU            → ICU Team
-      2. Critical elsewhere         → Rapid Response Team
-      3. High in ICU                → ICU Team
-      4. Infusion pump + high-risk drug → Pharmacy consult
-      5. Rules engine suggestion    (fallback)
-
-    The priority floor is NOT enforced here — that is the decision layer's job.
-    """
-    # 1 & 2: Critical always escalates, unit determines which team
+def resolve_route_with_reason(alert: AlertIn, baseline_priority: Priority, rule_suggested_route: str) -> tuple[str, str]:
+    """One branch selection supplies both the route and its engineering rationale."""
     if baseline_priority == Priority.critical:
-        return Routes.ICU_TEAM if _unit_is_icu(alert.unit) else Routes.RAPID_RESPONSE
-
-    # 3: High in ICU requires intensivist involvement
+        if _unit_is_icu(alert.unit):
+            return Routes.ICU_TEAM, f"Critical priority and unit {alert.unit!r} matching the ICU keyword classifier select {Routes.ICU_TEAM}."
+        return Routes.RAPID_RESPONSE, f"Critical priority with unit {alert.unit!r} outside the ICU keyword classifier selects {Routes.RAPID_RESPONSE}."
     if baseline_priority == Priority.high and _unit_is_icu(alert.unit):
-        return Routes.ICU_TEAM
-
-    # 4: Infusion alarm with a high-risk drug — loop pharmacy in
+        return Routes.ICU_TEAM, f"High priority and unit {alert.unit!r} matching the ICU keyword classifier select {Routes.ICU_TEAM}."
     if alert.alert_type == AlertType.infusion_pump:
-        infusate = str(alert.additional_context.get("infusate", "")).lower()
+        infusate = (alert.additional_context.infusate or "").lower()
         if any(drug in infusate for drug in _PHARMACY_DRUGS):
-            return Routes.PHARMACY_CONSULT
+            return Routes.PHARMACY_CONSULT, "The recorded infusion value matches the router's configured drug keyword list, selecting Pharmacy + Bedside Nurse."
+    return rule_suggested_route, f"No unit or infusion routing override applies; the router retains the rule-selected destination {rule_suggested_route}."
 
-    # 5: Fall back to whatever the rules engine suggested
-    return rule_suggested_route
+
+def resolve_route(alert: AlertIn, baseline_priority: Priority, rule_suggested_route: str) -> str:
+    return resolve_route_with_reason(alert, baseline_priority, rule_suggested_route)[0]

@@ -21,7 +21,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`${res.status} ${res.statusText}: ${body}`)
+    let detail = body
+    try {
+      const parsed = JSON.parse(body)
+      if (Array.isArray(parsed.detail)) detail = parsed.detail.map((item: { loc?: string[]; msg?: string }) => `${item.loc?.filter(part => part !== 'body').join('.')}: ${item.msg}`).join('; ')
+      else if (typeof parsed.detail === 'string') detail = parsed.detail
+    } catch { /* Non-JSON provider/proxy errors retain their response text. */ }
+    throw new Error(`${res.status} ${res.statusText}: ${detail}`)
   }
   return res.json() as Promise<T>
 }

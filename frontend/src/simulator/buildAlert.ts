@@ -9,12 +9,21 @@ export function generateAlertId(): string {
   return `SIM-${ts}-${rand}`
 }
 
-function parseNum(s: string): number | null {
-  const n = parseFloat(s)
-  return isNaN(n) ? null : n
+function parseNum(value: string): number | null {
+  if (!value.trim()) return null
+  const n = Number(value)
+  if (!Number.isFinite(n)) throw new Error('Measurements must be finite numbers; leave unavailable values blank.')
+  return n
+}
+function parseCount(value: string): number {
+  const n = parseNum(value) ?? 0
+  if (!Number.isInteger(n) || n < 0) throw new Error('Counts must be non-negative whole numbers.')
+  return n
 }
 
 export function buildAlert(form: SimulationFields): AlertIn {
+  if (!form.timestamp || !Number.isFinite(Date.parse(form.timestamp))) throw new Error('A valid alert time is required.')
+  if (!form.patient_id.trim() || !form.unit.trim()) throw new Error('Patient ID and unit are required.')
   let additionalContext: Record<string, unknown> = {}
   if (form.additional_context.trim()) {
     try {
@@ -28,14 +37,14 @@ export function buildAlert(form: SimulationFields): AlertIn {
   }
 
   return {
-    alert_id: form.alert_id.trim() || generateAlertId(),
+    alert_id: form.alert_id.trim(),
     source_system: form.source_system || 'Demo-Simulator',
     alert_type: form.alert_type,
-    patient_id: form.patient_id || 'P-UNKNOWN',
-    unit: form.unit || 'General',
+    patient_id: form.patient_id.trim(),
+    unit: form.unit.trim(),
     room: form.room || null,
     bed: form.bed || null,
-    timestamp: form.timestamp ? new Date(form.timestamp).toISOString() : new Date().toISOString(),
+    timestamp: new Date(form.timestamp).toISOString(),
     vital_signs: {
       heart_rate: parseNum(form.heart_rate),
       spo2: parseNum(form.spo2),
@@ -46,13 +55,13 @@ export function buildAlert(form: SimulationFields): AlertIn {
     },
     message_text: form.message_text || null,
     device_type: form.device_type || null,
-    repeat_count: parseInt(form.repeat_count, 10) || 0,
+    repeat_count: parseCount(form.repeat_count),
     recent_context: {
-      prior_alerts_24h: parseInt(form.prior_alerts_24h, 10) || 0,
+      prior_alerts_24h: parseCount(form.prior_alerts_24h),
       recent_medications: form.recent_medications
         ? form.recent_medications.split(',').map((s) => s.trim()).filter(Boolean)
         : [],
-      fall_risk_score: parseNum(form.fall_risk_score),
+      fall_risk_score: form.fall_risk_score.trim() ? parseCount(form.fall_risk_score) : null,
       admission_reason: form.admission_reason || null,
       code_status: form.code_status || null,
     },

@@ -365,3 +365,43 @@ Search matches alert ID, patient ID, or unit without case sensitivity. Priority 
 The compact queue displays priority, readable alert name, patient/unit, alert age, and review status. Routing and secondary identifiers remain in the detail view. Known repository fixtures are identified by their IDs and observed timestamps and labeled historical rather than presented as fresh alerts. Details label alert time and processing time separately.
 
 Simulator and audit dialogs use native modal isolation, labeled titles, explicit Tab wrapping, Escape dismissal, and focus restoration. UI regressions cover effective-value filtering, deterministic sorting, hidden-selection clearing, keyboard selection, and desktop/mobile dialog focus behavior.
+
+## Complete rules-only explainability
+
+Rules and the deterministic router remain the only sources of system priority and destination. A provider failure changes explanation mode, never the decision. Rules-only records now populate all six sections from recorded inputs, registered rule-condition metadata, and the router branch that selected the destination. Missing values are named as unavailable; verification guidance concerns source identifiers, units, timestamps, rule evidence, and human review rather than diagnosis or treatment. New records include `explanation_version: deterministic-v1` and structured `rule_evidence` alongside the original rule IDs.
+
+`explanation.fallback_reason` appears in alert/list/detail responses, full audit JSON, and the audit-list `fallback_reason` column. Reasons are:
+
+| Code | Meaning |
+| --- | --- |
+| `llm_disabled` | API key absent or blank; provider was not called |
+| `provider_failure` | Provider/adapter error or unavailable SDK |
+| `provider_timeout` | Provider timeout (15 seconds, SDK retries disabled) |
+| `malformed_output` | Empty/missing response content or unparseable JSON |
+| `schema_invalid` | JSON violates the required narrative schema, including empty text/items, non-finite confidence, or extra decision-authority fields |
+| `low_confidence` | Validated/capped narrative confidence below 0.5; rejected narrative is discarded and its confidence is recorded |
+| `content_rejected` | Provider refusal or content-filter finish signal |
+| `not_supplied` | A direct local decision-layer caller supplied no LLM outcome; this does not guess a provider failure |
+
+There is no semantic clinical-content classifier. Provider rejection signals are handled, but schema-valid narrative is not claimed to have passed diagnosis/treatment-content validation. Existing append-only decisions and narratives are not regenerated or backfilled. Legacy records have an unknown/null reason, labeled **Reason not recorded (legacy record)**. SQLite adds a nullable audit-list column without modifying old decision JSON.
+
+### Missing and invalid input policy
+
+Missing/null vital measurements remain unavailable and never satisfy numeric threshold rules. A provided zero is still a measurement, not an absent value. `rule_output.missing_fields` identifies unavailable inputs relevant to the alert's rule or routing checks; this can coexist with a matched repeat/base rule. Available-input rules still apply, so missing data never erases an already matched severity rule. An omitted repeat count uses the existing default 0 and is explicitly flagged as unavailable. Historical records lacking these provenance fields are not relabeled as fully observed.
+
+`NO_RULE_MATCHED` is an explicit trace marker, not a normal-result rule. The existing default remains **Low → Bedside Nurse**, rule confidence **0.5**. The API exposes `evaluation_status: no_rule_matched`, and the UI calls out that this establishes neither normality nor safety. The explanation asks the human to verify missing/non-triggering input and review the default. No severity thresholds or routing precedence were changed. A higher missing-data floor would be a separate rule-policy change.
+
+Ingestion requires nonblank alert/patient/source/unit identifiers, ISO 8601 alert timestamps with a timezone, finite numeric measurements, nonnegative integer counts (up to 1,000,000), and integer fall-risk scores 0–125. Numeric strings/booleans and unknown top-level/vital/context fields are rejected with 422 rather than silently coerced or ignored. Broad demo format bounds are HR 0–400 bpm, SpO2 0–100%, systolic 0–400 mmHg, diastolic 0–300 mmHg, respiratory rate 0–100/min, temperature 0–60 C. These are ingestion bounds, not clinical reference ranges or clinical validation. Optional measurements may be omitted; null containers and invalid supplied values are rejected. The simulator preserves blank measurements as null and rejects malformed numbers or fractional counts rather than silently dropping/truncating them.
+
+`additional_context` preserves arbitrary JSON metadata, while rule/router inputs `alarm_type` and `infusate` are typed nullable strings. Null/missing/unknown pump alarm values take the existing generic pump rule; missing alarm values are flagged. The existing pump simulator preset now sends its recorded occlusion/heparin values with these recognized keys, rather than an unused `drug` key. Non-string alarm/infusion values and non-finite nested metadata are rejected before evaluation. Validation errors expose field locations and messages without reflecting unsafe raw values into response JSON.
+
+### Local fallback demonstration (no public fault endpoint)
+
+From the repository root, with the backend environment available:
+
+```powershell
+.\backend\venv\Scripts\python.exe backend/demo_fallback.py --reason provider_timeout
+.\backend\venv\Scripts\python.exe backend/demo_fallback.py --reason low_confidence --fixture sample_data/alerts_low_spo2.json
+```
+
+The CLI emits a triage record labeled **Local fallback demonstration (simulated)** and **No live provider call was made**. It calls neither a provider nor the audit database. It supports the documented provider/fallback reasons solely as local demonstration options. There is no public fault-injection endpoint; submitting a top-level fallback-reason field is rejected. `frontend/e2e/fallback.json` is an explicitly labeled recorded local fixture generated by this tool, exercised at desktop and phone widths. API/audit persistence paths are separately covered with isolated mocked-provider tests. All backend suites default to an empty API key and make no external LLM calls.

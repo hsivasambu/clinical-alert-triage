@@ -1,0 +1,90 @@
+{
+  "alert_id": "LOCAL-FALLBACK-DEMO",
+  "alert": {
+    "alert_id": "LOCAL-FALLBACK-DEMO",
+    "source_system": "Local fallback demonstration (simulated)",
+    "alert_type": "sepsis",
+    "patient_id": "PT-EDGE-1003",
+    "unit": "4-Medical",
+    "room": "441",
+    "bed": "C",
+    "timestamp": "2026-04-19T01:18:00Z",
+    "vital_signs": {
+      "heart_rate": null,
+      "spo2": null,
+      "blood_pressure_systolic": null,
+      "blood_pressure_diastolic": null,
+      "respiratory_rate": null,
+      "temperature": null
+    },
+    "message_text": "Auto-screen fired from incomplete charting batch; source data may be delayed or duplicated.",
+    "device_type": "ehr_clinical_decision_support",
+    "repeat_count": 0,
+    "recent_context": {
+      "prior_alerts_24h": 0,
+      "recent_medications": [],
+      "fall_risk_score": null,
+      "admission_reason": null,
+      "code_status": null
+    },
+    "additional_context": {
+      "alarm_type": null,
+      "infusate": null,
+      "data_quality": "incomplete",
+      "feed_status": "partial_backfill",
+      "suspected_source": "unknown",
+      "local_demo": "Simulated fallback: provider_timeout. No live provider call was made."
+    }
+  },
+  "rule_output": {
+    "missing_fields": [
+      "vital_signs.temperature",
+      "vital_signs.heart_rate",
+      "vital_signs.respiratory_rate"
+    ],
+    "evaluation_status": "no_rule_matched",
+    "baseline_priority": "Low",
+    "matched_rules": [
+      "NO_RULE_MATCHED"
+    ],
+    "suggested_route": "Bedside Nurse",
+    "rule_confidence": 0.5
+  },
+  "explanation": {
+    "summary": "Screening alert LOCAL-FALLBACK-DEMO: no registered rule matched the supplied inputs. The deterministic decision is Low, routed to Bedside Nurse.",
+    "rationale": "No registered condition matched; the evaluator uses its documented default priority and destination. No unit or infusion routing override applies; the router retains the rule-selected destination Bedside Nurse. Priority and route are independent of LLM output.",
+    "factors_considered": [
+      "Heart rate: not provided; no normal value is assumed.",
+      "SpO2: not provided; no normal value is assumed.",
+      "Systolic pressure: not provided; no normal value is assumed.",
+      "Diastolic pressure: not provided; no normal value is assumed.",
+      "Respiratory rate: not provided; no normal value is assumed.",
+      "Temperature: not provided; no normal value is assumed.",
+      "Observed repeat count: 0."
+    ],
+    "uncertainty_notes": "This explanation describes supplied input and configured demo rules, not a clinical assessment. Missing measurements are unavailable, not normal. Insufficient data for some rule or routing checks: vital_signs.temperature, vital_signs.heart_rate, vital_signs.respiratory_rate. Available-input rules still apply. NO_RULE_MATCHED uses the existing Low / Bedside Nurse default with rule confidence 0.5; this does not establish normality or safety. Human review is required to assess the incomplete or non-triggering input.",
+    "recommended_checks": [
+      "Verify the recorded alert/patient identifiers, unit, alert time, and source before accepting the decision.",
+      "Verify unavailable rule inputs with the source: vital_signs.temperature, vital_signs.heart_rate, vital_signs.respiratory_rate. Do not infer values from their absence.",
+      "Compare the observed values and units against the recorded rule conditions; check source accuracy and freshness.",
+      "Review the deterministic priority and destination, then accept or record a reasoned human override. The original system decision remains preserved."
+    ],
+    "llm_confidence_estimate": null,
+    "explanation_mode": "rules_only",
+    "rule_trace": [
+      "NO_RULE_MATCHED"
+    ],
+    "rule_evidence": [
+      {
+        "rule_id": "NO_RULE_MATCHED",
+        "condition": "No registered condition matched the supplied inputs; default Low / Bedside Nurse decision applies."
+      }
+    ],
+    "fallback_reason": "provider_timeout",
+    "explanation_version": "deterministic-v1"
+  },
+  "final_priority": "Low",
+  "final_route": "Bedside Nurse",
+  "processed_at": "2026-10-05T17:42:15.000449Z",
+  "review_state": null
+}

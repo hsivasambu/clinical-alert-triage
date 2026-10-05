@@ -1,3 +1,4 @@
+import { fallbackLabel } from '../fallbackLabels'
 import { Dialog } from './Dialog'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
@@ -171,8 +172,9 @@ function FragmentRow({ entry, expanded, onToggle }: { entry: AuditLogEntry; expa
         </td>
         <td className="audit-td">
           <span style={{ color: entry.explanation_mode === 'hybrid' ? '#1e5d8a' : '#566579' }}>
-            {entry.explanation_mode}
+            {entry.explanation_mode === 'hybrid' ? 'Recorded AI narrative' : 'Recorded rules explanation'}
           </span>
+          {entry.explanation_mode === 'rules_only' && <div className="small muted">{fallbackLabel(entry.fallback_reason)}</div>}
         </td>
         <td className="audit-td">
           <ActionPills entry={entry} />
