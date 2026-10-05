@@ -81,3 +81,25 @@
   .demo-intro .intro-copy > p { font-size: 13px; }
   .scenario-actions .button { flex: 1; min-width: 0; text-align: center; padding: 9px 10px; }
 }
+
+.queue-controls { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin: 14px 0; }
+.queue-controls label { font-size: 12px; font-weight: 600; }
+.queue-controls > div:first-child { grid-column: 1 / -1; }
+.queue-controls .form-input { margin-top: 4px; }
+.queue-table th:first-child { width: 17%; } .queue-table th:nth-child(2) { width: 24%; }
+.queue-table th:nth-child(3) { width: 25%; } .queue-table th:nth-child(4) { width: 15%; }
+.queue-table td,.queue-table th { padding: 10px 7px; }
+.alert-select { min-height: 44px; }
+dialog.simulator-modal, dialog.audit-modal { border: 0; padding: 0; color: var(--ink); margin: auto; width: calc(100% - 32px); }
+dialog:not([open]) { display: none; } dialog::backdrop { background: rgba(0,0,0,.55); }
+.dialog-title { font-size: 18px; margin: 0; display: inline; }
+.simulator-field { flex: 1; min-width: 160px; } .simulator-field label { display: block; font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+.simulator-field .small { margin-bottom: 4px; }
+.simulator-input,.audit-filter-select { min-height: 44px; color: var(--ink); }
+.audit-filter-bar > label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; }
+@media(max-width:1000px) and (min-width:761px) { .queue-table,.queue-table tbody,.queue-table tr,.queue-table td { display: block; width: 100%; } .queue-table thead { display: none; } .queue-table tr { border-bottom: 1px solid var(--line); } .queue-table td { border: 0; padding: 6px 12px; } .queue-table td::before { content: attr(data-label); display: block; font-size: 11px; color: var(--muted); } }
+@media(max-width:760px) { .queue-controls { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+.simulator-modal-header,.audit-header { flex-wrap: nowrap; align-items: flex-start; }
+.simulator-modal-header > div,.audit-header > div { min-width: 0; }
+.simulator-close-btn,.audit-close-btn { flex-shrink: 0; }

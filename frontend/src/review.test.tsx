@@ -102,7 +102,8 @@ describe('human review workflow', () => {
     await screen.findByText(/Action saved. History refresh failed/)
     expect(screen.queryByText('Confirm Override')).toBeNull()
     const row = screen.getByRole('button', { name: 'View alert CRIT' }).closest('tr')!
-    expect(within(row).getByText('Reviewed route', { exact: false })).toBeTruthy()
+    expect(screen.getByText('Reviewed route', { selector: '.decision-line strong' })).toBeTruthy()
+    expect(within(row).getByText('High')).toBeTruthy()
     expect(within(row).getByText('overridden')).toBeTruthy()
     expect(screen.getByText('Override recorded in audit log.')).toBeTruthy()
     const updated = { ...audit(critical), review_state: reviewed, overrides: [record] }

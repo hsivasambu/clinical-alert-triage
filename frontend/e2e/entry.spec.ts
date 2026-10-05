@@ -54,7 +54,7 @@ for (const width of [1440, 390]) {
     await page.getByRole('link', { name: 'Review alert' }).click()
     await page.getByLabel('Reviewer ID').fill('Demo visitor')
     await page.getByRole('button', { name: 'Accept Decision' }).click()
-    await expect(page.getByRole('status')).toContainText('Decision accepted and logged.')
+    await expect(page.locator('#human-review').getByRole('status')).toContainText('Decision accepted and logged.')
     await expect(page.locator('.decision-header')).toContainText('accepted')
     await page.reload()
     await expect(page.locator('.decision-header')).toContainText('accepted')

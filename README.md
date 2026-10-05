@@ -357,3 +357,11 @@ Quick examples reuse existing simulator presets and the same alert serializer: d
 The initial available telemetry example (or first available alert) opens automatically without moving keyboard focus away from the introduction. Subsequent selections and Back actions take precedence. A delayed initial queue response merges existing results and cannot discard or replace a visitor's newly run example.
 
 Entry browser regressions cover the desktop/narrow-screen path from example submission through explanation, acceptance, and persistence after reload. Their API responses are mocked. All three generated scenario inputs were also checked against the real FastAPI endpoints using an isolated SQLite database and mocked-out LLM calls.
+
+## Queue controls and accessibility
+
+Search matches alert ID, patient ID, or unit without case sensitivity. Priority and review-status filters use the current effective human-reviewed decision. Severity-first ordering uses Critical, High, Medium, Low, then observed alert time newest first, then alert ID; newest-first ordering uses alert time and alert ID. Processing time does not affect queue ordering. Filtering a selected alert out clears its detail view; clearing filters does not silently reopen it. Running a quick/custom scenario clears queue filters so the newly selected result is visible.
+
+The compact queue displays priority, readable alert name, patient/unit, alert age, and review status. Routing and secondary identifiers remain in the detail view. Known repository fixtures are identified by their IDs and observed timestamps and labeled historical rather than presented as fresh alerts. Details label alert time and processing time separately.
+
+Simulator and audit dialogs use native modal isolation, labeled titles, explicit Tab wrapping, Escape dismissal, and focus restoration. UI regressions cover effective-value filtering, deterministic sorting, hidden-selection clearing, keyboard selection, and desktop/mobile dialog focus behavior.

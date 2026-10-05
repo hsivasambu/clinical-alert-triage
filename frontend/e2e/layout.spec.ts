@@ -61,7 +61,7 @@ for (const width of [1440, 390]) {
     const pending = new Promise<void>((resolve) => { complete = resolve })
     await page.route('**/alerts', async (route) => { await pending; await route.fulfill({ json: [] }) })
     await page.goto('/')
-    await expect(page.getByRole('status')).toHaveText('Loading alerts…')
+    await expect(page.getByRole('status').filter({ hasText: 'Loading alerts…' })).toHaveText('Loading alerts…')
     complete()
     await expect(page.getByRole('heading', { name: 'No alerts yet' })).toBeVisible()
     await page.unroute('**/alerts')

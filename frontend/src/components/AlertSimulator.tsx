@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { Dialog } from './Dialog'
+import { Children, cloneElement, isValidElement, useState } from 'react'
 import { api } from '../api/client'
 import type { AlertType, TriageResult } from '../types'
 import { buildAlert, generateAlertId } from '../simulator/buildAlert'
@@ -90,11 +91,10 @@ export function AlertSimulator({ onResult, onClose }: Props) {
   }
 
   return (
-    <div className="simulator-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="simulator-modal">
+    <Dialog titleId="simulator-modal-title" className="simulator-modal" onClose={onClose}>
         <div className="simulator-modal-header">
           <div>
-            <span style={{ fontWeight: 700, fontSize: 16 }}>Alert Simulator</span>
+            <h2 id="simulator-modal-title" className="dialog-title">Alert Simulator</h2>
             <span style={{ marginLeft: 10, fontSize: 12, color: '#90caf9', background: '#1a4a7a', padding: '2px 8px', borderRadius: 4 }}>
               Rules are decision authority | LLM is explainability only
             </span>
@@ -104,7 +104,7 @@ export function AlertSimulator({ onResult, onClose }: Props) {
 
         <div className="simulator-modal-body">
           <div style={{ marginBottom: 20 }}>
-            <label className="simulator-section-label">Quick Presets</label>
+            <p className="simulator-section-label">Quick Presets</p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {ALERT_TYPES.map((type) => (
                 <button
@@ -178,7 +178,7 @@ export function AlertSimulator({ onResult, onClose }: Props) {
             </FieldRow>
 
             <FieldRow>
-              <Field label="Timestamp">
+              <Field label="Alert time">
                 <input
                   className="simulator-input"
                   type="datetime-local"
@@ -264,7 +264,7 @@ export function AlertSimulator({ onResult, onClose }: Props) {
           </FormSection>
 
           <FormSection title="Additional Context (optional JSON)">
-            <textarea
+            <textarea aria-label="Additional context (optional JSON)"
               className="simulator-input" style={{ width: '100%', minHeight: 80, fontFamily: 'monospace', fontSize: 12, resize: 'vertical', boxSizing: 'border-box' }}
               value={form.additional_context}
               onChange={(e) => set('additional_context', e.target.value)}
@@ -276,7 +276,7 @@ export function AlertSimulator({ onResult, onClose }: Props) {
 
         <div className="simulator-modal-footer">
           {error && (
-            <div style={{ flex: 1, color: '#c0392b', fontSize: 13, background: '#fdf2f2', border: '1px solid #f5c6c6', borderRadius: 4, padding: '6px 10px' }}>
+            <div role="alert" style={{ flex: 1, color: '#c0392b', fontSize: 13, background: '#fdf2f2', border: '1px solid #f5c6c6', borderRadius: 4, padding: '6px 10px' }}>
               {error}
             </div>
           )}
@@ -287,8 +287,7 @@ export function AlertSimulator({ onResult, onClose }: Props) {
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -310,13 +309,11 @@ function FieldRow({ children }: { children: React.ReactNode }) {
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div style={{ flex: 1, minWidth: 160 }}>
-      <label style={{ display: 'block', fontSize: 12, color: '#555', marginBottom: 4, fontWeight: 500 }}>
-        {label}
-        {hint && <span style={{ color: '#999', fontWeight: 400, marginLeft: 5 }}>- {hint}</span>}
-      </label>
-      {children}
-    </div>
-  )
+  const id = `sim-${label.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`
+  function associate(node: React.ReactNode): React.ReactNode {
+    if (!isValidElement<{ children?: React.ReactNode; id?: string }>(node)) return node
+    if (node.type === 'input' || node.type === 'select') return cloneElement(node, { id })
+    return node.props.children ? cloneElement(node, { children: Children.map(node.props.children, associate) }) : node
+  }
+  return <div className="simulator-field"><label htmlFor={id}>{label}</label>{hint && <p className="muted small">{hint}</p>}{Children.map(children, associate)}</div>
 }
