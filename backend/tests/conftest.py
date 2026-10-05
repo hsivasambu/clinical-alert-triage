@@ -42,3 +42,9 @@ def make_alert(
         recent_context=recent_context or RecentContext(),
         additional_context=additional_context or {},
     )
+
+
+@pytest.fixture(autouse=True)
+def disable_external_llm(monkeypatch):
+    """Default to offline explanations; LLM unit tests explicitly install mocks."""
+    monkeypatch.setenv("OPENAI_API_KEY", "")

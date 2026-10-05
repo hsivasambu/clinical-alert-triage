@@ -242,8 +242,8 @@ The frontend uses strict TypeScript and Vite production build as the main verifi
 
 1. Start the backend.
 2. Start the frontend.
-3. Open the simulator and choose a preset.
-4. Submit the alert and inspect:
+3. Pick a quick scenario and click **Run example**, or use **Advanced customization** to open the full simulator.
+4. Inspect the selected result:
    - baseline severity
    - final route
    - explanation mode
@@ -294,8 +294,7 @@ clinical-alert-triage/
 
 ## Known Gaps / Likely Next Work
 
-- queue-level review status and effective post-override state
-- stronger frontend automated test coverage
+- broader frontend automated test coverage
 - richer audit drill-down and filtering
 - evaluation views over override and feedback trends
 
@@ -328,3 +327,33 @@ The live demo is hosted on Render (backend) and Vercel (frontend).
 - The backend seeds 6 sample alerts on first startup if the database is empty.
 - Render's free tier has an ephemeral filesystem — submitted alerts do not persist across restarts, but sample alerts reseed automatically.
 - A free UptimeRobot monitor pings `/health` every 5 minutes to keep the backend warm.
+
+## Human review semantics
+
+The original `final_priority` and `final_route` remain the system decision. `review_state` on alert list/detail and per-alert audit responses exposes the effective priority, route, decision version, and status separately.
+
+- Version 0 identifies the original system decision. Each override ID identifies a new effective decision version; the latest override wins. An omitted route retains the previous effective route.
+- Acceptances snapshot the current version, priority, and route. The UI sends the displayed version; a stale version returns 409 without recording acceptance. Repeated acceptances append records without changing the decision.
+- Status starts `unreviewed`, becomes `overridden` after an override, and becomes `accepted` when the current version is accepted. A later override returns it to `overridden`, even if the values match an older accepted version. Feedback does not change status.
+- Existing acceptance rows are preserved with unknown version/snapshot fields. They appear in history but do not imply acceptance of the current decision.
+- History loads whenever an alert is selected, including after a browser reload. Drafts and messages reset on alert switches. Successful mutations update the queue/detail from the response; failed history refreshes offer a read-only retry and explicitly confirm the action was saved.
+
+Run frontend regression tests with `npm test`. Backend tests default to an empty LLM API key; LLM unit tests use mocked provider responses.
+
+## Recruiter-facing frontend
+
+The desktop workspace keeps the queue beside an explanation-first alert view. Below 761px, selecting an alert opens a full-width detail view; Back returns to the queue and restores keyboard focus. The decision header distinguishes current human changes from the original deterministic system decision. Source metadata, observed context, and technical provenance are expandable. All six explanation sections remain visible even when narrative fields are unavailable; missing content is identified rather than fabricated.
+
+Core components and dialog style definitions use `frontend/src/styles.css`. Readable rule labels in `frontend/src/ruleLabels.ts` are presentation copies of existing rule descriptions, not a second rules engine. Update these labels if rule descriptions change.
+
+`npm test` runs the review regressions. `npm run test:browser` runs Playwright layout checks using installed Microsoft Edge, with mocked API responses and no LLM calls. Checks cover widths 320, 390, 768, 1024, and 1440; long text; keyboard selection and Back; review controls; loading, empty, error and retry states; and narrative/decision provenance. Screenshots are generated under `frontend/test-results/` and ignored by Git. `npm run build` verifies TypeScript and the production bundle.
+
+## First-visit entry flow
+
+The compact introduction identifies simulated portfolio data and explains the three responsibilities: rules assign priority/routing, AI supplies explanation only, and humans review. Repository links use the verified Git origin (`https://github.com/hsivasambu/clinical-alert-triage`); the project blog is linked alongside it.
+
+Quick examples reuse existing simulator presets and the same alert serializer: deterministic threshold, ICU context routing, and repeated nurse-call escalation. Each click creates a fresh alert through `POST /alerts`; it does not replay a recorded AI response. **Advanced customization** preserves the full simulator. Explanations returned by the API are labeled as recorded with their decisions, including rules-only responses; opening an existing alert does not generate an explanation live.
+
+The initial available telemetry example (or first available alert) opens automatically without moving keyboard focus away from the introduction. Subsequent selections and Back actions take precedence. A delayed initial queue response merges existing results and cannot discard or replace a visitor's newly run example.
+
+Entry browser regressions cover the desktop/narrow-screen path from example submission through explanation, acceptance, and persistence after reload. Their API responses are mocked. All three generated scenario inputs were also checked against the real FastAPI endpoints using an isolated SQLite database and mocked-out LLM calls.

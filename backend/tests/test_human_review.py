@@ -237,7 +237,7 @@ class TestFeedback:
     def test_multiple_feedback_allowed(self, client):
         post_alert(client)
         client.post("/alerts/TEST-001/feedback", json={"reviewer_id": "Dr.A", "rating": "helpful"})
-        resp = client.post("/alerts/TEST-001/feedback", json={"reviewer_id": "Dr.B", "rating": "not_helpful"})
+        resp = client.post("/alerts/TEST-001/feedback", json={"reviewer_id": "Dr.B", "rating": "not_helpful", "reason_category": "explanation_unclear"})
         assert resp.status_code == 201
 
 
@@ -335,3 +335,66 @@ class TestAuditLog:
         ids = [e["alert_id"] for e in resp.json()]
         assert "A-002" in ids
         assert "A-001" not in ids
+
+
+class TestEffectiveReview:
+    def test_review_versions_route_retention_and_restart(self, client):
+        original = post_alert(client)
+        assert client.get('/alerts/TEST-001').json()['review_state']['review_status'] == 'unreviewed'
+        accepted = client.post('/alerts/TEST-001/accept', json={'reviewer_id': 'A', 'decision_version': 0}).json()
+        assert accepted['accepted_priority'] == original['final_priority']
+        assert accepted['accepted_route'] == original['final_route']
+        first = client.post('/alerts/TEST-001/override', json={
+            'reviewer_id': 'B', 'overridden_priority': 'Low', 'overridden_route': 'Charge Nurse', 'reason': 'Demo review'
+        }).json()
+        assert first['review_state']['review_status'] == 'overridden'
+        stale = client.post('/alerts/TEST-001/accept', json={'reviewer_id': 'A', 'decision_version': 0})
+        assert stale.status_code == 409
+        accepted = client.post('/alerts/TEST-001/accept', json={'reviewer_id': 'A', 'decision_version': first['id']}).json()
+        assert accepted['accepted_priority'] == 'Low'
+        assert accepted['accepted_route'] == 'Charge Nurse'
+        assert accepted['review_state']['review_status'] == 'accepted'
+        second = client.post('/alerts/TEST-001/override', json={
+            'reviewer_id': 'C', 'overridden_priority': 'Medium', 'reason': 'Second review'
+        }).json()
+        assert second['review_state']['effective_route'] == 'Charge Nurse'
+        assert second['review_state']['review_status'] == 'overridden'
+        client.post('/alerts/TEST-001/feedback', json={'reviewer_id': 'A', 'rating': 'helpful'})
+        main._store.clear()
+        for result in database.load_triage_results():
+            main._store[result.alert_id] = result
+        detail = client.get('/alerts/TEST-001').json()
+        assert detail['final_priority'] == original['final_priority']
+        assert detail['final_route'] == original['final_route']
+        assert detail['review_state'] == second['review_state']
+        assert client.get('/alerts').json()[0]['review_state'] == second['review_state']
+        audit = client.get('/alerts/TEST-001/audit').json()
+        assert len(audit['overrides']) == 2
+        assert len(audit['acceptances']) == 2
+        assert len(audit['feedback']) == 1
+        assert audit['acceptances'][0]['decision_version'] == 0
+        assert audit['acceptances'][1]['decision_version'] == first['id']
+
+    def test_legacy_acceptance_is_not_assumed_to_accept_current_version(self, client):
+        post_alert(client)
+        import sqlite3
+        with sqlite3.connect(database.DB_PATH) as conn:
+            conn.execute("INSERT INTO acceptances (alert_id, reviewer_id, created_at) VALUES (?, ?, ?)",
+                         ('TEST-001', 'Legacy', '2024-01-01T00:00:00Z'))
+        audit = client.get('/alerts/TEST-001/audit').json()
+        assert audit['acceptances'][0]['decision_version'] is None
+        assert audit['review_state']['review_status'] == 'unreviewed'
+
+
+    def test_existing_database_migration_preserves_legacy_rows(self, tmp_path):
+        import sqlite3
+        path = tmp_path / 'legacy.db'
+        with sqlite3.connect(path) as conn:
+            conn.execute('CREATE TABLE acceptances (id INTEGER PRIMARY KEY, alert_id TEXT NOT NULL, reviewer_id TEXT NOT NULL, created_at TEXT NOT NULL)')
+            conn.execute("INSERT INTO acceptances VALUES (1, 'OLD', 'Reviewer', '2024-01-01T00:00:00Z')")
+        database.init_db(path)
+        database.init_db(path)
+        records = database.get_acceptances('OLD', path)
+        assert len(records) == 1
+        assert records[0].reviewer_id == 'Reviewer'
+        assert records[0].decision_version is None

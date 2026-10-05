@@ -11,3 +11,13 @@ venv/
 # Node
 node_modules/
 dist/
+
+# Browser verification artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright-results/
+
+# Local verification scratch directories
+.test-tmp-*/
+.pytest-review-*/
+pytest-cache-files-*/

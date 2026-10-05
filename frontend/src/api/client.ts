@@ -34,10 +34,10 @@ export const api = {
   getAlert: (alertId: string) => request<TriageResult>(`/alerts/${alertId}`),
 
   // Human review
-  acceptAlert: (alertId: string, reviewerId: string) =>
+  acceptAlert: (alertId: string, reviewerId: string, decisionVersion?: number) =>
     request<AcceptanceRecord>(`/alerts/${alertId}/accept`, {
       method: 'POST',
-      body: JSON.stringify({ reviewer_id: reviewerId }),
+      body: JSON.stringify({ reviewer_id: reviewerId, decision_version: decisionVersion }),
     }),
 
   submitOverride: (alertId: string, body: OverrideIn) =>

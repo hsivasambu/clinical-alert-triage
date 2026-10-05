@@ -86,6 +86,7 @@ export interface TriageResult {
   final_priority: Priority
   final_route: string
   processed_at: string
+  review_state?: ReviewState
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +101,7 @@ export interface OverrideIn {
 }
 
 export interface OverrideRecord {
+  review_state?: ReviewState
   id: number
   alert_id: string
   reviewer_id: string
@@ -129,6 +131,10 @@ export interface FeedbackRecord {
 }
 
 export interface AcceptanceRecord {
+  decision_version: number | null
+  accepted_priority: Priority | null
+  accepted_route: string | null
+  review_state?: ReviewState
   id: number
   alert_id: string
   reviewer_id: string
@@ -136,6 +142,7 @@ export interface AcceptanceRecord {
 }
 
 export interface AlertAudit {
+  review_state: ReviewState
   triage_result: TriageResult
   overrides: OverrideRecord[]
   feedback: FeedbackRecord[]
@@ -157,4 +164,11 @@ export interface AuditLogEntry {
   override_count: number
   feedback_count: number
   acceptance_count: number
+}
+
+export interface ReviewState {
+  effective_priority: Priority
+  effective_route: string
+  decision_version: number
+  review_status: 'unreviewed' | 'overridden' | 'accepted'
 }

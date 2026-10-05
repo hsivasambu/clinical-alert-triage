@@ -166,7 +166,7 @@ def triage_alert(alert: AlertIn) -> TriageResult:
 @app.get("/alerts", response_model=List[TriageResult])
 def list_alerts() -> List[TriageResult]:
     """Return all in-memory triage results, newest first."""
-    return sorted(_store.values(), key=lambda r: r.processed_at, reverse=True)
+    return [with_review(r) for r in sorted(_store.values(), key=lambda r: r.processed_at, reverse=True)]
 
 
 @app.get("/alerts/{alert_id}", response_model=TriageResult)
@@ -175,7 +175,11 @@ def get_alert(alert_id: str) -> TriageResult:
     result = _store.get(alert_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found.")
-    return result
+    return with_review(result)
+
+
+def with_review(result: TriageResult) -> TriageResult:
+    return result.model_copy(update={"review_state": database.get_review_state(result.alert_id, result)})
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +194,11 @@ def accept_alert(alert_id: str, body: AcceptanceIn) -> AcceptanceRecord:
     """
     if alert_id not in _store:
         raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found.")
-    return database.log_acceptance(alert_id, body)
+    try:
+        record = database.log_acceptance(alert_id, body, triage_result=_store[alert_id])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return record.model_copy(update={"review_state": database.get_review_state(alert_id, _store[alert_id])})
 
 
 @app.post("/alerts/{alert_id}/override", response_model=OverrideRecord, status_code=201)
@@ -204,12 +212,13 @@ def override_alert(alert_id: str, body: OverrideIn) -> OverrideRecord:
     if result is None:
         raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found.")
 
-    return database.log_override(
+    record = database.log_override(
         alert_id=alert_id,
         override_in=body,
         original_priority=result.final_priority,
         original_route=result.final_route,
     )
+    return record.model_copy(update={"review_state": database.get_review_state(alert_id, result)})
 
 
 @app.post("/alerts/{alert_id}/feedback", response_model=FeedbackRecord, status_code=201)

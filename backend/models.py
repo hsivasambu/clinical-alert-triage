@@ -127,6 +127,13 @@ class ExplanationOutput(BaseModel):
 # Layer 4 output — final triage result
 # ---------------------------------------------------------------------------
 
+class ReviewState(BaseModel):
+    effective_priority: Priority
+    effective_route: str
+    decision_version: int = 0  # 0 = original system decision; otherwise override ID
+    review_status: Literal["unreviewed", "overridden", "accepted"] = "unreviewed"
+
+
 class TriageResult(BaseModel):
     """Full output of the decision layer — stored in audit log and returned to UI."""
     alert_id:       str
@@ -136,6 +143,7 @@ class TriageResult(BaseModel):
     final_priority: Priority
     final_route:    str
     processed_at:   datetime
+    review_state: Optional[ReviewState] = None
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +181,7 @@ class OverrideRecord(BaseModel):
     overridden_route:    Optional[str]
     reason:              str
     created_at:          datetime
+    review_state: Optional[ReviewState] = None
 
 
 class FeedbackIn(BaseModel):
@@ -205,6 +214,7 @@ class FeedbackRecord(BaseModel):
 class AcceptanceIn(BaseModel):
     """Request body for POST /alerts/{id}/accept."""
     reviewer_id: str = Field(min_length=1)
+    decision_version: Optional[int] = Field(None, ge=0)
 
 
 class AcceptanceRecord(BaseModel):
@@ -213,6 +223,10 @@ class AcceptanceRecord(BaseModel):
     alert_id:    str
     reviewer_id: str
     created_at:  datetime
+    decision_version: Optional[int] = None
+    accepted_priority: Optional[Priority] = None
+    accepted_route: Optional[str] = None
+    review_state: Optional[ReviewState] = None
 
 
 class AlertAudit(BaseModel):
@@ -221,3 +235,4 @@ class AlertAudit(BaseModel):
     overrides:     List[OverrideRecord]
     feedback:      List[FeedbackRecord]
     acceptances:   List[AcceptanceRecord]
+    review_state: ReviewState

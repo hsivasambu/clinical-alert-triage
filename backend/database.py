@@ -37,6 +37,7 @@ from models import (
     OverrideRecord,
     Priority,
     RuleOutput,
+    ReviewState,
     TriageResult,
 )
 
@@ -101,6 +102,10 @@ def init_db(db_path: Optional[Path] = None) -> None:
     """Create all tables if they do not already exist."""
     with sqlite3.connect(_db(db_path)) as conn:
         conn.executescript(_SCHEMA)
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(acceptances)")}
+        for name, kind in [("decision_version", "INTEGER"), ("accepted_priority", "TEXT"), ("accepted_route", "TEXT")]:
+            if name not in columns:
+                conn.execute(f"ALTER TABLE acceptances ADD COLUMN {name} {kind}")
         conn.commit()
 
 
@@ -237,7 +242,7 @@ def get_overrides(alert_id: str, db_path: Optional[Path] = None) -> List[Overrid
     with sqlite3.connect(_db(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM overrides WHERE alert_id = ? ORDER BY created_at ASC",
+            "SELECT * FROM overrides WHERE alert_id = ? ORDER BY id ASC",
             (alert_id,),
         ).fetchall()
     return [
@@ -302,7 +307,7 @@ def get_feedback(alert_id: str, db_path: Optional[Path] = None) -> List[Feedback
     with sqlite3.connect(_db(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM feedback WHERE alert_id = ? ORDER BY created_at ASC",
+            "SELECT * FROM feedback WHERE alert_id = ? ORDER BY id ASC",
             (alert_id,),
         ).fetchall()
     return [
@@ -327,13 +332,19 @@ def log_acceptance(
     alert_id: str,
     acceptance_in: AcceptanceIn,
     db_path: Optional[Path] = None,
+    triage_result: Optional[TriageResult] = None,
 ) -> AcceptanceRecord:
     """Append an acceptance action and return the persisted record."""
     now = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(_db(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        state = get_review_state(alert_id, triage_result, db_path) if triage_result else None
+        if state and acceptance_in.decision_version is not None and acceptance_in.decision_version != state.decision_version:
+            raise ValueError("Decision changed; refresh before accepting.")
         cur = conn.execute(
-            "INSERT INTO acceptances (alert_id, reviewer_id, created_at) VALUES (?, ?, ?)",
-            (alert_id, acceptance_in.reviewer_id, now),
+            "INSERT INTO acceptances (alert_id, reviewer_id, created_at, decision_version, accepted_priority, accepted_route) VALUES (?, ?, ?, ?, ?, ?)",
+            (alert_id, acceptance_in.reviewer_id, now, state.decision_version if state else None,
+             state.effective_priority.value if state else None, state.effective_route if state else None),
         )
         conn.commit()
         row_id = cur.lastrowid
@@ -343,6 +354,9 @@ def log_acceptance(
         alert_id=alert_id,
         reviewer_id=acceptance_in.reviewer_id,
         created_at=now,
+        decision_version=state.decision_version if state else None,
+        accepted_priority=state.effective_priority if state else None,
+        accepted_route=state.effective_route if state else None,
     )
 
 
@@ -351,7 +365,7 @@ def get_acceptances(alert_id: str, db_path: Optional[Path] = None) -> List[Accep
     with sqlite3.connect(_db(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM acceptances WHERE alert_id = ? ORDER BY created_at ASC",
+            "SELECT * FROM acceptances WHERE alert_id = ? ORDER BY id ASC",
             (alert_id,),
         ).fetchall()
     return [
@@ -360,6 +374,9 @@ def get_acceptances(alert_id: str, db_path: Optional[Path] = None) -> List[Accep
             alert_id=r["alert_id"],
             reviewer_id=r["reviewer_id"],
             created_at=r["created_at"],
+            decision_version=r["decision_version"],
+            accepted_priority=r["accepted_priority"],
+            accepted_route=r["accepted_route"],
         )
         for r in rows
     ]
@@ -441,7 +458,21 @@ def get_alert_audit(alert_id: str, triage_result: TriageResult, db_path: Optiona
 
     return {
         "triage_result": json.loads(triage_result.model_dump_json()),
+        "review_state": get_review_state(alert_id, triage_result, db_path).model_dump(mode="json"),
         "overrides": [json.loads(r.model_dump_json()) for r in overrides],
         "feedback": [json.loads(r.model_dump_json()) for r in feedbacks],
         "acceptances": [json.loads(r.model_dump_json()) for r in acceptances],
     }
+
+
+def get_review_state(alert_id: str, result: TriageResult, db_path: Optional[Path] = None) -> ReviewState:
+    overrides = get_overrides(alert_id, db_path)
+    priority, route, version = result.final_priority, result.final_route, 0
+    for override in overrides:
+        priority = override.overridden_priority
+        route = override.overridden_route or route
+        version = override.id
+    accepted = any(a.decision_version == version and a.accepted_priority == priority and a.accepted_route == route
+                   for a in get_acceptances(alert_id, db_path))
+    return ReviewState(effective_priority=priority, effective_route=route, decision_version=version,
+                       review_status="accepted" if accepted else "overridden" if version else "unreviewed")
