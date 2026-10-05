@@ -26,19 +26,15 @@ from llm_explainer import LLMRawOutput, CONFIDENCE_THRESHOLD, explain, is_enable
 from tests.conftest import make_alert
 
 
-def _valid_llm_payload(**overrides: Any) -> dict:
-    """Return a payload that passes LLMRawOutput validation."""
-    base = {
-        "summary": "Heart rate of 145 bpm triggered a High priority alert.",
-        "rationale": (
-            "The heart rate exceeds the 130 bpm threshold defined by rule HR_GT_130. "
-            "This level of tachycardia warrants prompt bedside assessment."
-        ),
-        "factors_considered": ["Heart rate 145 bpm", "Threshold: HR > 130", "No repeat count"],
-        "uncertainty_notes": "No information on patient's baseline heart rate or recent activity.",
-        "recommended_checks": ["Verify lead placement and signal quality", "Assess patient responsiveness"],
-        "confidence": 0.88,
-    }
+def _valid_llm_payload(alert=None, **overrides: Any) -> dict:
+    alert = alert or make_alert()
+    base = dict(summary="The recorded rules determine the decision.",
+                rationale="DECISION_FINAL records the destination selected by the router.",
+                factors_considered=["OBS_UNIT supplies recorded routing context."],
+                uncertainty_notes="Source accuracy is not independently verified.",
+                recommended_checks=["Verify source units and alert time."],
+                triggering_rule_ids=[id for id in evaluate(alert).matched_rules if id != "NO_RULE_MATCHED"],
+                context_evidence_ids=["OBS_UNIT"], confidence=0.88)
     base.update(overrides)
     return base
 
@@ -84,7 +80,7 @@ class TestValidLLMOutput:
             vital_signs=VitalSigns(heart_rate=145.0),
         )
         rule_output = evaluate(alert)
-        payload = _valid_llm_payload()
+        payload = _valid_llm_payload(alert=alert)
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             with _patch_openai(return_value=_mock_openai_response(payload)):
@@ -101,9 +97,9 @@ class TestValidLLMOutput:
             vital_signs=VitalSigns(heart_rate=110.0, temperature=39.0),
         )
         rule_output = evaluate(alert)
-        payload = _valid_llm_payload(
-            summary="Sepsis screen positive: two SIRS criteria met.",
-            factors_considered=["HR 110 bpm > 90", "Temp 39 C > 38.3 C"],
+        payload = _valid_llm_payload(alert=alert,
+            summary="The matched rules determine the recorded priority.",
+            factors_considered=["Recorded input supplied.", "OBS_UNIT supplies routing context."],
         )
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
@@ -121,7 +117,7 @@ class TestValidLLMOutput:
             vital_signs=VitalSigns(spo2=85.0),
         )
         rule_output = evaluate(alert)
-        llm_out = LLMRawOutput(**_valid_llm_payload(confidence=0.90))
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert, confidence=0.90))
 
         triage = apply(alert, rule_output, llm_output=llm_out)
 
@@ -135,7 +131,7 @@ class TestValidLLMOutput:
             vital_signs=VitalSigns(spo2=85.0),
         )
         rule_output = evaluate(alert)
-        llm_out = LLMRawOutput(**_valid_llm_payload())
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert))
 
         triage = apply(alert, rule_output, llm_output=llm_out)
 
@@ -164,7 +160,7 @@ class TestMalformedOutput:
     def test_missing_required_field_returns_none(self):
         alert = make_alert(alert_type=AlertType.tachycardia)
         rule_output = evaluate(alert)
-        payload = _valid_llm_payload()
+        payload = _valid_llm_payload(alert=alert)
         del payload["summary"]
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
@@ -198,7 +194,7 @@ class TestMalformedOutput:
     def test_confidence_out_of_range_returns_none(self):
         alert = make_alert(alert_type=AlertType.tachycardia)
         rule_output = evaluate(alert)
-        payload = _valid_llm_payload(confidence=1.5)
+        payload = _valid_llm_payload(alert=alert, confidence=1.5)
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             with _patch_openai(return_value=_mock_openai_response(payload)):
@@ -239,7 +235,7 @@ class TestLowConfidenceFallback:
     def test_low_confidence_output_still_parsed(self):
         alert = make_alert(alert_type=AlertType.nurse_call, repeat_count=4)
         rule_output = evaluate(alert)
-        payload = _valid_llm_payload(confidence=0.3)
+        payload = _valid_llm_payload(alert=alert, confidence=0.3)
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             with _patch_openai(return_value=_mock_openai_response(payload)):
@@ -251,7 +247,7 @@ class TestLowConfidenceFallback:
     def test_decision_layer_uses_rules_only_for_low_confidence(self):
         alert = make_alert(alert_type=AlertType.nurse_call, repeat_count=4)
         rule_output = evaluate(alert)
-        llm_out = LLMRawOutput(**_valid_llm_payload(confidence=0.3))
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert, confidence=0.3))
 
         triage = apply(alert, rule_output, llm_output=llm_out)
 
@@ -264,7 +260,7 @@ class TestLowConfidenceFallback:
             vital_signs=VitalSigns(heart_rate=145.0),
         )
         rule_output = evaluate(alert)
-        llm_out = LLMRawOutput(**_valid_llm_payload(confidence=CONFIDENCE_THRESHOLD))
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert, confidence=CONFIDENCE_THRESHOLD))
 
         triage = apply(alert, rule_output, llm_output=llm_out)
 
@@ -276,7 +272,7 @@ class TestLowConfidenceFallback:
             vital_signs=VitalSigns(heart_rate=145.0),
         )
         rule_output = evaluate(alert)
-        llm_out = LLMRawOutput(**_valid_llm_payload(confidence=CONFIDENCE_THRESHOLD - 0.01))
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert, confidence=CONFIDENCE_THRESHOLD - 0.01))
 
         triage = apply(alert, rule_output, llm_output=llm_out)
 
@@ -306,7 +302,7 @@ class TestConfidenceCalibration:
             additional_context={"waveform_quality": "good", "trend_direction": "worsening"},
         )
         rule_output = evaluate(alert)
-        payload = _valid_llm_payload(confidence=0.90)
+        payload = _valid_llm_payload(alert=alert, confidence=0.90)
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             with _patch_openai(return_value=_mock_openai_response(payload)):
@@ -333,7 +329,7 @@ class TestConfidenceCalibration:
             additional_context={"signal_quality": "fair"},
         )
         rule_output = evaluate(alert)
-        payload = _valid_llm_payload(confidence=0.90)
+        payload = _valid_llm_payload(alert=alert, confidence=0.90)
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             with _patch_openai(return_value=_mock_openai_response(payload)):
@@ -350,7 +346,7 @@ class TestConfidenceCalibration:
             additional_context={"sensor_status": "intermittent_signal", "data_quality": "partial"},
         )
         rule_output = evaluate(alert)
-        payload = _valid_llm_payload(confidence=0.88)
+        payload = _valid_llm_payload(alert=alert, confidence=0.88)
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             with _patch_openai(return_value=_mock_openai_response(payload)):
@@ -404,7 +400,7 @@ class TestGuardrailPreservation:
         rule_output = evaluate(alert)
         assert rule_output.baseline_priority == Priority.critical
 
-        llm_out = LLMRawOutput(**_valid_llm_payload(confidence=0.95))
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert, confidence=0.95))
         triage = apply(alert, rule_output, llm_output=llm_out)
 
         assert triage.final_priority == Priority.critical
@@ -415,7 +411,7 @@ class TestGuardrailPreservation:
             vital_signs=VitalSigns(spo2=85.0),
         )
         rule_output = evaluate(alert)
-        llm_out = LLMRawOutput(**_valid_llm_payload(confidence=0.2))
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert, confidence=0.2))
         triage = apply(alert, rule_output, llm_output=llm_out)
 
         assert triage.final_priority == Priority.critical
@@ -437,7 +433,7 @@ class TestGuardrailPreservation:
             vital_signs=VitalSigns(heart_rate=110.0, temperature=39.0, respiratory_rate=22.0),
         )
         rule_output = evaluate(alert)
-        llm_out = LLMRawOutput(**_valid_llm_payload(confidence=0.85))
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert, confidence=0.85))
         triage = apply(alert, rule_output, llm_output=llm_out)
 
         assert triage.explanation.explanation_mode == ExplanationMode.hybrid
@@ -460,7 +456,7 @@ class TestGuardrailPreservation:
             vital_signs=VitalSigns(spo2=85.0),
         )
         rule_output = evaluate(alert)
-        llm_out = LLMRawOutput(**_valid_llm_payload())
+        llm_out = LLMRawOutput(**_valid_llm_payload(alert=alert))
 
         triage = apply(alert, rule_output, llm_output=llm_out)
 

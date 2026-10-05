@@ -60,7 +60,7 @@ export interface AlertIn {
   additional_context: Record<string, unknown>
 }
 
-export type FallbackReason = 'llm_disabled' | 'provider_failure' | 'provider_timeout' | 'malformed_output' | 'schema_invalid' | 'low_confidence' | 'content_rejected' | 'not_supplied'
+export type FallbackReason = 'llm_disabled' | 'provider_failure' | 'provider_timeout' | 'malformed_output' | 'schema_invalid' | 'low_confidence' | 'content_rejected' | 'not_supplied' | 'evidence_mismatch' | 'contradiction'
 
 export interface RuleOutput {
   missing_fields?: string[]
@@ -71,7 +71,18 @@ export interface RuleOutput {
   rule_confidence: number
 }
 
+export interface GenerationProvenance {
+  rules_version?: string | null; prompt_version?: string | null; prompt_hash?: string | null; rendered_prompt_hash?: string | null
+  configured_model?: string | null; returned_model?: string | null; validation_version?: string | null; validation_outcome?: string | null
+  validation_issues?: string[]; fallback_reason?: FallbackReason | null; generation_duration_ms?: number | null; request_correlation_id?: string | null
+}
 export interface ExplanationOutput {
+  triggering_rule_ids?: string[]
+  context_observations?: { evidence_id: string; label: string; value: unknown; unit?: string | null; available: boolean }[]
+  referenced_context_ids?: string[]
+  llm_self_reported_confidence?: number | null
+  confidence_cap?: number | null
+  confidence_cap_reason?: string | null
   fallback_reason?: FallbackReason | null
   explanation_version?: string | null
   rule_evidence?: { rule_id: string; condition: string }[]
@@ -86,6 +97,7 @@ export interface ExplanationOutput {
 }
 
 export interface TriageResult {
+  provenance?: GenerationProvenance | null
   alert_id: string
   alert: AlertIn
   rule_output: RuleOutput
@@ -108,6 +120,7 @@ export interface OverrideIn {
 }
 
 export interface OverrideRecord {
+  event_sequence?: number | null
   review_state?: ReviewState | null
   id: number
   alert_id: string
@@ -128,6 +141,7 @@ export interface FeedbackIn {
 }
 
 export interface FeedbackRecord {
+  event_sequence?: number | null
   id: number
   alert_id: string
   reviewer_id: string
@@ -138,6 +152,7 @@ export interface FeedbackRecord {
 }
 
 export interface AcceptanceRecord {
+  event_sequence?: number | null
   decision_version: number | null
   accepted_priority: Priority | null
   accepted_route: string | null
@@ -157,6 +172,7 @@ export interface AlertAudit {
 }
 
 export interface AuditLogEntry {
+  provenance?: GenerationProvenance | null
   fallback_reason?: FallbackReason | null
   id: number
   alert_id: string

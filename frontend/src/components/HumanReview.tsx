@@ -1,3 +1,4 @@
+import { ReviewHistory } from './ReviewHistory'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type {
@@ -314,9 +315,7 @@ export function HumanReview({ result, audit, reviewerId, onReviewerIdChange, onA
           Review status: {state?.review_status ?? 'unreviewed'}; decision version: {state?.decision_version ?? 0}
           <div>History: {audit?.overrides.length ?? 0} overrides, {audit?.acceptances.length ?? 0} acceptances</div>
           {audit && <details><summary>Review history</summary>
-            {audit.overrides.map((o) => <div key={`o${o.id}`}>Override #{o.id}: {o.overridden_priority}, {o.overridden_route ?? 'route retained'} — {o.reviewer_id}: {o.reason}</div>)}
-            {audit.acceptances.map((a) => <div key={`a${a.id}`}>Acceptance #{a.id}: version {a.decision_version ?? 'unknown (legacy)'}, {a.accepted_priority}, {a.accepted_route} — {a.reviewer_id}</div>)}
-            {audit.feedback.map((f) => <div key={`f${f.id}`}>Feedback #{f.id}: {f.rating} — {f.reviewer_id}: {f.reason_category} {f.comment}</div>)}
+            <ReviewHistory audit={audit} />
           </details>}
         </div>
         {historyError && <div role="alert" className="notice notice-error">{historyError} <button className="button" onClick={() => refreshAudit().catch(() => setHistoryError('History refresh failed. Retry loading history.'))}>Retry history</button></div>}

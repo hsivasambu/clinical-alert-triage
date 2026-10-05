@@ -30,6 +30,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+from uuid import uuid4
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +40,7 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -132,7 +134,17 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
+
+@app.middleware("http")
+async def correlation_id(request: Request, call_next):
+    supplied = request.headers.get("X-Request-ID", "")
+    request.state.correlation_id = supplied if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", supplied) else str(uuid4())
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request.state.correlation_id
+    return response
+
 
 # In-memory store — every triage result is also persisted to SQLite via database.py
 _store: Dict[str, TriageResult] = {}
@@ -153,7 +165,7 @@ async def validation_error_response(request, exc: RequestValidationError):
 
 
 @app.post("/alerts", response_model=TriageResult, status_code=201)
-def triage_alert(alert: AlertIn) -> TriageResult:
+def triage_alert(alert: AlertIn, request: Request = None) -> TriageResult:
     """
     Ingest a new alert, run the rules engine, apply guardrails, persist to
     the audit log, and return the full triage result.
@@ -167,7 +179,7 @@ def triage_alert(alert: AlertIn) -> TriageResult:
         )
 
     rule_output = rules_engine.evaluate(alert)
-    llm_output = llm_explainer.explain_with_outcome(alert, rule_output)
+    llm_output = llm_explainer.explain_with_outcome(alert, rule_output, getattr(request.state, "correlation_id", None) if request else None)
     result = decision_layer.apply(alert, rule_output, llm_output=llm_output)
 
     _store[alert.alert_id] = result

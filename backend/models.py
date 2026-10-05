@@ -141,7 +141,7 @@ class RuleOutput(BaseModel):
 
 FallbackReason = Literal[
     "llm_disabled", "provider_failure", "provider_timeout", "malformed_output",
-    "schema_invalid", "low_confidence", "content_rejected", "not_supplied",
+    "schema_invalid", "low_confidence", "content_rejected", "evidence_mismatch", "contradiction", "not_supplied",
 ]
 
 
@@ -150,12 +150,41 @@ class RuleEvidence(BaseModel):
     condition: str
 
 
+class EvidenceObservation(BaseModel):
+    evidence_id: str
+    label: str
+    value: JsonValue
+    unit: Optional[str] = None
+    available: bool = True
+
+
+class GenerationProvenance(BaseModel):
+    rules_version: Optional[str] = None
+    prompt_version: Optional[str] = None
+    prompt_hash: Optional[str] = None
+    rendered_prompt_hash: Optional[str] = None
+    configured_model: Optional[str] = None
+    returned_model: Optional[str] = None
+    validation_version: Optional[str] = None
+    validation_outcome: Optional[str] = None
+    validation_issues: List[str] = Field(default_factory=list)
+    fallback_reason: Optional[FallbackReason] = None
+    generation_duration_ms: Optional[float] = None
+    request_correlation_id: Optional[str] = None
+
+
 class ExplanationOutput(BaseModel):
     """Recorded narrative plus deterministic trace and optional LLM fallback reason.
 
     Nullable provenance fields preserve legacy records without guessing why they
     fell back or rewriting their original narrative.
     """
+    triggering_rule_ids: List[str] = Field(default_factory=list)
+    context_observations: List[EvidenceObservation] = Field(default_factory=list)
+    referenced_context_ids: List[str] = Field(default_factory=list)
+    llm_self_reported_confidence: Optional[float] = None
+    confidence_cap: Optional[float] = None
+    confidence_cap_reason: Optional[str] = None
     summary: str = ""
     rationale: str = ""
     factors_considered: List[str] = Field(default_factory=list)
@@ -189,6 +218,7 @@ class TriageResult(BaseModel):
     final_priority: Priority
     final_route:    str
     processed_at:   datetime
+    provenance: Optional[GenerationProvenance] = None
     review_state: Optional[ReviewState] = None
 
 
@@ -218,6 +248,7 @@ class OverrideIn(BaseModel):
 
 class OverrideRecord(BaseModel):
     """Persisted override — includes original values for full audit trail."""
+    event_sequence: Optional[int] = None
     id:                  int
     alert_id:            str
     reviewer_id:         str
@@ -248,6 +279,7 @@ class FeedbackIn(BaseModel):
 
 class FeedbackRecord(BaseModel):
     """Persisted explanation quality feedback."""
+    event_sequence: Optional[int] = None
     id:              int
     alert_id:        str
     reviewer_id:     str
@@ -265,6 +297,7 @@ class AcceptanceIn(BaseModel):
 
 class AcceptanceRecord(BaseModel):
     """Persisted acceptance — records that reviewer agreed with the AI triage."""
+    event_sequence: Optional[int] = None
     id:          int
     alert_id:    str
     reviewer_id: str

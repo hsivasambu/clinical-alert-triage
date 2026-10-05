@@ -25,7 +25,7 @@ def main():
     alert = AlertIn.model_validate(data)
     output = None
     if args.reason == "low_confidence":
-        output = LLMRawOutput(summary="Simulated rejected narrative.", rationale="Simulated rejected narrative.",
+        output = LLMRawOutput(triggering_rule_ids=[], context_evidence_ids=["OBS_UNIT"], summary="Simulated rejected narrative.", rationale="Simulated rejected narrative.",
             factors_considered=["Simulated rejected narrative."], uncertainty_notes="Simulated rejected narrative.",
             recommended_checks=["Simulated rejected narrative."], confidence=0.1)
     result = apply(alert, evaluate(alert), LLMOutcome(output=output, fallback_reason=args.reason))

@@ -105,3 +105,10 @@ dialog:not([open]) { display: none; } dialog::backdrop { background: rgba(0,0,0,
 .simulator-close-btn,.audit-close-btn { flex-shrink: 0; }
 
 .button-outline:hover:not(:disabled) { background: #24476f; color: #fff; }
+
+.metadata-row { display: contents; }
+.audit-timeline { padding-left: 1.4rem; }
+.audit-timeline li { margin-bottom: 1rem; overflow-wrap: anywhere; }
+.audit-timeline time { font-size: .8rem; color: var(--muted, #566579); }
+
+.audit-detail { width: min(720px, calc(100vw - 96px)); max-width: 100%; overflow-wrap: anywhere; }

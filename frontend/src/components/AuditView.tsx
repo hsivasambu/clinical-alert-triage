@@ -1,3 +1,6 @@
+import { ReviewHistory } from './ReviewHistory'
+import { GenerationDetails } from './GenerationDetails'
+import type { AlertAudit } from '../types'
 import { fallbackLabel } from '../fallbackLabels'
 import { Dialog } from './Dialog'
 import { useEffect, useState } from 'react'
@@ -217,28 +220,20 @@ function ActionPills({ entry }: { entry: AuditLogEntry }) {
 }
 
 function ExpandedRow({ entry }: { entry: AuditLogEntry }) {
-  return (
-    <div style={{ display: 'flex', gap: 24, fontSize: 12 }}>
-      <div>
-        <div className="audit-expand-label">Baseline priority</div>
-        <div>{entry.baseline_priority}</div>
-      </div>
-      <div>
-        <div className="audit-expand-label">Final priority</div>
-        <div>{entry.final_priority}</div>
-      </div>
-      <div>
-        <div className="audit-expand-label">Final route</div>
-        <div>{entry.final_route}</div>
-      </div>
-      <div>
-        <div className="audit-expand-label">Rule confidence</div>
-        <div>{entry.rule_confidence.toFixed(2)}</div>
-      </div>
-      <div>
-        <div className="audit-expand-label">Processing time</div>
-        <div>{new Date(entry.created_at).toLocaleString()}</div>
-      </div>
-    </div>
-  )
+  const [audit, setAudit] = useState<AlertAudit | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [retry, setRetry] = useState(0)
+  useEffect(() => {
+    let active = true
+    setAudit(null); setError(null)
+    api.getAlertAudit(entry.alert_id).then(data => { if (active) setAudit(data) }).catch(e => { if (active) setError(e instanceof Error ? e.message : 'History unavailable') })
+    return () => { active = false }
+  }, [entry.alert_id, retry])
+  return <div className="audit-detail"><h3>Decision and review history</h3>
+    {!audit && !error && <p role="status">Loading review history…</p>}
+    {error && <p role="alert">{error} <button className="button" onClick={() => setRetry(r => r + 1)}>Retry history</button></p>}
+    {audit && <ReviewHistory audit={audit} />}
+    <h4>Generation provenance</h4><GenerationDetails provenance={audit?.triage_result.provenance ?? entry.provenance} />
+    <p className="muted small">Manual demo rule weight: {entry.rule_confidence.toFixed(2)}. This is not measured clinical reliability.</p>
+  </div>
 }

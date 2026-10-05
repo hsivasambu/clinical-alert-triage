@@ -18,10 +18,13 @@ from rules_engine import evaluate
 from tests.conftest import make_alert
 
 
-def payload(confidence=0.8):
+def payload(confidence=0.8, alert=None):
+    alert = alert or make_alert(alert_type=AlertType.low_spo2, vital_signs=VitalSigns(spo2=85), unit="ICU")
     return dict(summary="Validated recorded narrative.", rationale="Recorded rule rationale.",
                 factors_considered=["Recorded input."], uncertainty_notes="Source not independently verified.",
-                recommended_checks=["Verify source."], confidence=confidence)
+                recommended_checks=["Verify source."], confidence=confidence,
+                triggering_rule_ids=[id for id in evaluate(alert).matched_rules if id != "NO_RULE_MATCHED"],
+                context_evidence_ids=["OBS_UNIT"])
 
 
 def response(content=None, refusal=None, finish="stop"):
@@ -94,7 +97,7 @@ def test_fallback_path_persists_reason_and_preserves_decision(case, reason, monk
 def test_valid_narrative_threshold_and_routing_are_independent(monkeypatch):
     alert = make_alert(alert_type=AlertType.infusion_pump, additional_context={"alarm_type": "occlusion", "infusate": "heparin"})
     rules = evaluate(alert)
-    outputs = [None, LLMOutcome(fallback_reason="provider_failure"), LLMRawOutput(**payload(0.49)), LLMRawOutput(**payload(CONFIDENCE_THRESHOLD)), LLMRawOutput(**payload(0.95))]
+    outputs = [None, LLMOutcome(fallback_reason="provider_failure"), LLMRawOutput(**payload(0.49, alert)), LLMRawOutput(**payload(CONFIDENCE_THRESHOLD, alert)), LLMRawOutput(**payload(0.95, alert))]
     results = [apply(alert, rules, output) for output in outputs]
     assert {(r.final_priority, r.final_route) for r in results} == {("High", "Pharmacy + Bedside Nurse")}
     assert results[2].explanation.fallback_reason == "low_confidence"

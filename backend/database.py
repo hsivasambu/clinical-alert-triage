@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at           TEXT     NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS review_events (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_id TEXT NOT NULL, action_type TEXT NOT NULL, record_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL, UNIQUE(action_type, record_id)
+);
+
 CREATE TABLE IF NOT EXISTS overrides (
     id                   INTEGER  PRIMARY KEY AUTOINCREMENT,
     alert_id             TEXT     NOT NULL,
@@ -109,6 +115,8 @@ def init_db(db_path: Optional[Path] = None) -> None:
         audit_columns = {r[1] for r in conn.execute("PRAGMA table_info(audit_log)")}
         if "fallback_reason" not in audit_columns:
             conn.execute("ALTER TABLE audit_log ADD COLUMN fallback_reason TEXT")
+        if "provenance_json" not in audit_columns:
+            conn.execute("ALTER TABLE audit_log ADD COLUMN provenance_json TEXT")
         conn.commit()
 
 
@@ -129,10 +137,10 @@ def log_triage(
             INSERT INTO audit_log (
                 alert_id, alert_type, patient_id, unit,
                 baseline_priority, final_priority, final_route, explanation_mode,
-                rule_confidence, fallback_reason,
+                rule_confidence, fallback_reason, provenance_json,
                 alert_json, rule_output_json, final_response_json,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 alert.alert_id,
@@ -145,6 +153,7 @@ def log_triage(
                 result.explanation.explanation_mode.value,
                 rule_output.rule_confidence,
                 result.explanation.fallback_reason,
+                result.provenance.model_dump_json() if result.provenance else None,
                 alert.model_dump_json(),
                 rule_output.model_dump_json(),
                 result.model_dump_json(),
@@ -225,11 +234,15 @@ def log_override(
                 now,
             ),
         )
-        conn.commit()
         row_id = cur.lastrowid
+        event = conn.execute("INSERT INTO review_events (alert_id, action_type, record_id, created_at) VALUES (?, ?, ?, ?)",
+                             (alert_id, "override", row_id, now))
+        sequence = event.lastrowid
+        conn.commit()
 
     return OverrideRecord(
         id=row_id,
+        event_sequence=sequence,
         alert_id=alert_id,
         reviewer_id=override_in.reviewer_id,
         original_priority=original_priority,
@@ -246,12 +259,13 @@ def get_overrides(alert_id: str, db_path: Optional[Path] = None) -> List[Overrid
     with sqlite3.connect(_db(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM overrides WHERE alert_id = ? ORDER BY id ASC",
+            "SELECT *, (SELECT sequence FROM review_events e WHERE e.action_type = 'override' AND e.record_id = overrides.id) AS event_sequence FROM overrides WHERE alert_id = ? ORDER BY id ASC",
             (alert_id,),
         ).fetchall()
     return [
         OverrideRecord(
             id=r["id"],
+            event_sequence=r["event_sequence"],
             alert_id=r["alert_id"],
             reviewer_id=r["reviewer_id"],
             original_priority=r["original_priority"],
@@ -292,11 +306,15 @@ def log_feedback(
                 now,
             ),
         )
-        conn.commit()
         row_id = cur.lastrowid
+        event = conn.execute("INSERT INTO review_events (alert_id, action_type, record_id, created_at) VALUES (?, ?, ?, ?)",
+                             (alert_id, "feedback", row_id, now))
+        sequence = event.lastrowid
+        conn.commit()
 
     return FeedbackRecord(
         id=row_id,
+        event_sequence=sequence,
         alert_id=alert_id,
         reviewer_id=feedback_in.reviewer_id,
         rating=feedback_in.rating,
@@ -311,12 +329,13 @@ def get_feedback(alert_id: str, db_path: Optional[Path] = None) -> List[Feedback
     with sqlite3.connect(_db(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM feedback WHERE alert_id = ? ORDER BY id ASC",
+            "SELECT *, (SELECT sequence FROM review_events e WHERE e.action_type = 'feedback' AND e.record_id = feedback.id) AS event_sequence FROM feedback WHERE alert_id = ? ORDER BY id ASC",
             (alert_id,),
         ).fetchall()
     return [
         FeedbackRecord(
             id=r["id"],
+            event_sequence=r["event_sequence"],
             alert_id=r["alert_id"],
             reviewer_id=r["reviewer_id"],
             rating=r["rating"],
@@ -350,11 +369,15 @@ def log_acceptance(
             (alert_id, acceptance_in.reviewer_id, now, state.decision_version if state else None,
              state.effective_priority.value if state else None, state.effective_route if state else None),
         )
-        conn.commit()
         row_id = cur.lastrowid
+        event = conn.execute("INSERT INTO review_events (alert_id, action_type, record_id, created_at) VALUES (?, ?, ?, ?)",
+                             (alert_id, "acceptance", row_id, now))
+        sequence = event.lastrowid
+        conn.commit()
 
     return AcceptanceRecord(
         id=row_id,
+        event_sequence=sequence,
         alert_id=alert_id,
         reviewer_id=acceptance_in.reviewer_id,
         created_at=now,
@@ -369,12 +392,13 @@ def get_acceptances(alert_id: str, db_path: Optional[Path] = None) -> List[Accep
     with sqlite3.connect(_db(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM acceptances WHERE alert_id = ? ORDER BY id ASC",
+            "SELECT *, (SELECT sequence FROM review_events e WHERE e.action_type = 'acceptance' AND e.record_id = acceptances.id) AS event_sequence FROM acceptances WHERE alert_id = ? ORDER BY id ASC",
             (alert_id,),
         ).fetchall()
     return [
         AcceptanceRecord(
             id=r["id"],
+            event_sequence=r["event_sequence"],
             alert_id=r["alert_id"],
             reviewer_id=r["reviewer_id"],
             created_at=r["created_at"],
@@ -447,6 +471,8 @@ def get_audit_log(
         entry.pop("alert_json", None)
         entry.pop("rule_output_json", None)
         entry.pop("final_response_json", None)
+        entry["provenance"] = json.loads(entry.pop("provenance_json")) if entry.get("provenance_json") else None
+        entry.pop("provenance_json", None)
         results.append(entry)
     return results
 

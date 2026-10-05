@@ -2,8 +2,8 @@
 
 explain_with_outcome() is the API pipeline entry point; explain() remains an
 optional-output compatibility helper for callers that do not persist provenance.
-Provider refusals/content-filter finishes are recognized; no semantic clinical
-content classifier is claimed. Raw failures/provider payloads are not returned.
+Provider rejection and conservative evidence/phrase checks are recognized;
+these syntactic checks do not guarantee semantic safety. Raw failures/provider payloads are not returned.
 """
 
 from __future__ import annotations
@@ -11,12 +11,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StringConstraints, ValidationError
 
-from models import AlertIn, FallbackReason, RuleOutput
+from models import AlertIn, FallbackReason, GenerationProvenance, RuleOutput
+from explanation_contract import rejection_reason, validate_narrative
+from provenance import generation_metadata
 from prompt_builder import build_messages
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,11 @@ class LLMRawOutput(BaseModel):
     factors_considered: list[NonEmptyText] = Field(min_length=1)
     uncertainty_notes: NonEmptyText
     recommended_checks: list[NonEmptyText] = Field(min_length=1)
+    triggering_rule_ids: list[NonEmptyText]
+    context_evidence_ids: list[NonEmptyText]
+    _self_reported_confidence: Optional[float] = PrivateAttr(default=None)
+    _confidence_cap_value: Optional[float] = PrivateAttr(default=None)
+    _confidence_cap_reason: Optional[str] = PrivateAttr(default=None)
     confidence: float = Field(ge=0.0, le=1.0, strict=True, allow_inf_nan=False)
 
 
@@ -50,6 +58,7 @@ class LLMRawOutput(BaseModel):
 class LLMOutcome:
     output: Optional[LLMRawOutput] = None
     fallback_reason: Optional[FallbackReason] = None
+    provenance: Optional[GenerationProvenance] = None
 
 
 class LLMFallbackError(Exception):
@@ -126,19 +135,33 @@ def is_enabled() -> bool:
     return bool(os.environ.get("OPENAI_API_KEY", "").strip())
 
 
-def explain_with_outcome(alert: AlertIn, rule_output: RuleOutput) -> LLMOutcome:
+def explain_with_outcome(alert: AlertIn, rule_output: RuleOutput, correlation_id: str | None = None) -> LLMOutcome:
+    metadata = generation_metadata(alert, rule_output, correlation_id)
+    metadata.configured_model = _MODEL
+    start = time.perf_counter()
+    output, reason = None, None
     if not is_enabled():
-        return LLMOutcome(fallback_reason="llm_disabled")
-    try:
-        output = _call_llm(alert, rule_output)
-        return LLMOutcome(output=output, fallback_reason="low_confidence" if output.confidence < CONFIDENCE_THRESHOLD else None)
-    except LLMFallbackError as exc:
-        return LLMOutcome(fallback_reason=exc.reason)
-    except TimeoutError:
-        return LLMOutcome(fallback_reason="provider_timeout")
-    except Exception:
-        logger.warning("LLM provider failure for alert %s", alert.alert_id)
-        return LLMOutcome(fallback_reason="provider_failure")
+        reason = "llm_disabled"
+        metadata.validation_outcome = "not_attempted"
+    else:
+        try:
+            output = _call_llm(alert, rule_output, metadata)
+            reason = "low_confidence" if output.confidence < CONFIDENCE_THRESHOLD else None
+            metadata.validation_outcome = "low_confidence" if reason else "accepted_by_practical_checks"
+        except LLMFallbackError as exc:
+            reason = exc.reason
+            metadata.validation_outcome = "rejected" if reason in {"schema_invalid", "malformed_output", "content_rejected", "evidence_mismatch", "contradiction"} else "provider_error"
+            if not metadata.validation_issues: metadata.validation_issues = [reason]
+        except TimeoutError:
+            reason = "provider_timeout"
+            metadata.validation_outcome = "provider_error"
+        except Exception:
+            logger.warning("LLM provider failure for alert %s", alert.alert_id)
+            reason = "provider_failure"
+            metadata.validation_outcome = "provider_error"
+    metadata.fallback_reason = reason
+    metadata.generation_duration_ms = round((time.perf_counter() - start) * 1000, 3) if is_enabled() else 0.0
+    return LLMOutcome(output=output, fallback_reason=reason, provenance=metadata)
 
 
 def explain(alert: AlertIn, rule_output: RuleOutput) -> Optional[LLMRawOutput]:
@@ -146,7 +169,7 @@ def explain(alert: AlertIn, rule_output: RuleOutput) -> Optional[LLMRawOutput]:
     return explain_with_outcome(alert, rule_output).output
 
 
-def _call_llm(alert: AlertIn, rule_output: RuleOutput) -> LLMRawOutput:
+def _call_llm(alert: AlertIn, rule_output: RuleOutput, metadata: GenerationProvenance) -> LLMRawOutput:
     try:
         from openai import APITimeoutError, OpenAI, OpenAIError
     except ImportError:
@@ -163,6 +186,8 @@ def _call_llm(alert: AlertIn, rule_output: RuleOutput) -> LLMRawOutput:
         raise LLMFallbackError("provider_timeout") from None
     except OpenAIError:
         raise LLMFallbackError("provider_failure") from None
+    returned_model = getattr(response, "model", None)
+    metadata.returned_model = returned_model if isinstance(returned_model, str) else None
     if not response.choices:
         raise LLMFallbackError("malformed_output")
     choice = response.choices[0]
@@ -172,10 +197,10 @@ def _call_llm(alert: AlertIn, rule_output: RuleOutput) -> LLMRawOutput:
     raw_text = choice.message.content
     if not isinstance(raw_text, str) or not raw_text.strip():
         raise LLMFallbackError("malformed_output")
-    return _parse_and_validate(alert, raw_text)
+    return _parse_and_validate(alert, rule_output, raw_text, metadata)
 
 
-def _parse_and_validate(alert: AlertIn, raw_text: str) -> LLMRawOutput:
+def _parse_and_validate(alert: AlertIn, rules: RuleOutput, raw_text: str, metadata: GenerationProvenance) -> LLMRawOutput:
     try:
         data = json.loads(raw_text)
     except (json.JSONDecodeError, TypeError):
@@ -184,7 +209,16 @@ def _parse_and_validate(alert: AlertIn, raw_text: str) -> LLMRawOutput:
         result = LLMRawOutput.model_validate(data)
     except ValidationError:
         raise LLMFallbackError("schema_invalid") from None
-    capped_confidence = min(result.confidence, _confidence_cap(alert))
+    issues = validate_narrative(alert, rules, result)
+    if issues:
+        metadata.validation_issues = issues
+        raise LLMFallbackError(rejection_reason(issues))
+    raw_confidence = result.confidence
+    cap = _confidence_cap(alert)
+    capped_confidence = min(raw_confidence, cap)
     if capped_confidence != result.confidence:
         result = result.model_copy(update={"confidence": round(capped_confidence, 2)})
+    result._self_reported_confidence = raw_confidence
+    result._confidence_cap_value = cap
+    result._confidence_cap_reason = "Deterministic demo cap based on the count of available measurements/context signals and configured noisy-source markers; not a calibrated probability or clinical reliability measure."
     return result
