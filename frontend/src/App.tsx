@@ -7,6 +7,7 @@ import { AlertDetail } from './components/AlertDetail'
 import { AlertSimulator } from './components/AlertSimulator'
 import { ScenarioChooser } from './components/ScenarioChooser'
 import { AuditView } from './components/AuditView'
+import { About, OutputLegend } from './components/Callouts'
 import type { AlertAudit, TriageResult } from './types'
 
 export default function App() {
@@ -124,6 +125,7 @@ export default function App() {
         <div className="intro-copy">
           <div className="section-heading"><h2 id="intro-heading">How it works</h2><span className="badge">Simulated data · Portfolio demo</span></div>
           <p><strong>Rules assign priority and routing.</strong> <strong>AI explains</strong> when available; it never decides. <strong>Humans review</strong> and retain final control. Every successful action is recorded.</p><p className="muted small">Shared synthetic demo history persists on server storage until an operator archives/resets it. Never enter real patient data.</p>
+          <OutputLegend />
           <nav className="intro-links" aria-label="About this project">
             <a href="https://github.com/hsivasambu/clinical-alert-triage" target="_blank" rel="noopener noreferrer">Repository <span className="sr-only">(opens in a new tab)</span>↗</a>
             <a href="https://blog.harry-sivasambu.com/blog/clinical-alert-triage" target="_blank" rel="noopener noreferrer">Project blog <span className="sr-only">(opens in a new tab)</span>↗</a>
@@ -134,7 +136,7 @@ export default function App() {
       <main className={`workspace ${selected ? 'has-selection' : ''}`}>
         <section className="queue-pane" aria-labelledby="queue" aria-busy={loading}>
           <div className="section-heading"><h2 id="queue" ref={queueRef} tabIndex={-1}>Alert Queue</h2><span className="muted">{visibleResults.length} / {results.length} alerts</span></div>
-          <p className="muted">Select a simulated alert to follow its decision and explanation.</p>
+          <About>Select a simulated alert to follow its decision and explanation. Sorting ties: alert time newest first, then alert ID. Age uses alert time; fixed samples are historical fixtures.</About>
           <div className="queue-controls">
             <div><label htmlFor="queue-search">Search alert / patient ID or unit</label><input id="queue-search" className="form-input" type="search" value={filters.search} onChange={e => setFilters({ ...filters, search: e.target.value })} /></div>
             <div><label htmlFor="queue-priority">Priority</label><select id="queue-priority" className="form-input" value={filters.priority} onChange={e => setFilters({ ...filters, priority: e.target.value })}><option value="">All priorities</option>{PRIORITIES.map(p => <option key={p}>{p}</option>)}</select></div>
@@ -142,7 +144,7 @@ export default function App() {
             <div><label htmlFor="queue-sort">Sort</label><select id="queue-sort" className="form-input" value={filters.sort} onChange={e => setFilters({ ...filters, sort: e.target.value })}><option value="severity">Severity first</option><option value="newest">Newest alert first</option></select></div>
             <button className="button" onClick={() => setFilters(DEFAULT_QUEUE_FILTERS)}>Clear queue filters</button>
           </div>
-          <p className="muted small" role="status">{visibleResults.length} matching alerts. Sorting ties: alert time newest first, then alert ID. Age uses alert time; fixed samples are historical fixtures.</p>
+          <p className="muted small" role="status">{visibleResults.length} matching alerts.</p>
           {results.length > 0 && visibleResults.length === 0 && <p className="empty-state" role="status">No alerts match these filters. Clear filters to see all alerts.</p>}
           {initializing && <div className="empty-state" role="status">Initializing demo alerts… {refreshPaused ? <><p>Automatic refresh paused after six checks. Retry to check again.</p><button className="button" onClick={loadAlerts}>Retry loading alerts</button></> : <p>Checking every two seconds while sample seeding finishes.</p>}</div>}
           {loading && !initializing && <div className="empty-state" role="status">Loading alerts…</div>}

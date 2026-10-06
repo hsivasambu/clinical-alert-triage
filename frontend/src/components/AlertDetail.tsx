@@ -6,6 +6,7 @@ import { VITAL_LABELS } from '../observations'
 import type { AlertAudit, TriageResult } from '../types'
 import { ExplanationPanel } from './ExplanationPanel'
 import { HumanReview } from './HumanReview'
+import { About } from './Callouts'
 interface Props { result: TriageResult; audit: AlertAudit | null; reviewerId: string; onReviewerIdChange: (id: string) => void; onAuditUpdate: (audit: AlertAudit) => void }
 export function AlertDetail({ result, audit, reviewerId, onReviewerIdChange, onAuditUpdate }: Props) {
   const { alert, rule_output, explanation, final_priority, final_route } = result
@@ -35,7 +36,7 @@ export function AlertDetail({ result, audit, reviewerId, onReviewerIdChange, onA
       </details>
       <details className="panel disclosure"><summary>Technical details <span className="muted small">Rules & provenance</span></summary><dl className="metadata">
         <Row label="Original system priority" value={final_priority} /><Row label="Original system route" value={final_route} /><Row label="Baseline priority" value={rule_output.baseline_priority} /><Row label="Rule suggested route" value={rule_output.suggested_route} /><Row label="Manual demo rule weight" value={rule_output.rule_confidence.toFixed(2)} /><Row label="Explanation mode" value={explanation.explanation_mode} /><Row label="Rules-only reason" value={explanation.explanation_mode === 'rules_only' ? fallbackLabel(explanation.fallback_reason) : 'Not applicable: recorded AI narrative'} /><Row label="Explanation version" value={explanation.explanation_version ?? 'Not recorded'} /><Row label="Self-reported explanation estimate (capped)" value={explanation.llm_confidence_estimate?.toFixed(2) ?? 'Not available'} /><Row label="Processing time" value={new Date(result.processed_at).toLocaleString()} /><Row label="Matched rule IDs" value={rule_output.matched_rules.join(', ') || 'No matched rules returned'} />
-      </dl><p className="muted small">Rule weights are manually assigned demo metadata, not measured clinical reliability.</p><GenerationDetails provenance={result.provenance} /></details>
+      </dl><About>Rule weights are manually assigned demo metadata, not measured clinical reliability.</About><GenerationDetails provenance={result.provenance} /></details>
     </div>
   </article>
 }

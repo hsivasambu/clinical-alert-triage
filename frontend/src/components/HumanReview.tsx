@@ -9,6 +9,7 @@ import type {
   Priority,
   TriageResult,
 } from '../types'
+import { About } from './Callouts'
 import { FEEDBACK_REASON_CATEGORIES, PRIORITIES } from '../types'
 
 interface Props {
@@ -159,7 +160,7 @@ export function HumanReview({ result, audit, reviewerId, onReviewerIdChange, onA
   return (
     <section id="human-review" className="panel human-review" tabIndex={-1} aria-labelledby="review-heading">
       <h3 id="review-heading">Human Review</h3>
-      <p className="muted small">Accept the current decision, record a human override, or rate the explanation. Each action is logged.</p>
+      <About>Accept the current decision, record a human override, or rate the explanation. Each action is logged.</About>
       {!audit && !historyError && <p role="status">Loading review history…</p>}
       <div>
         {latestOverride && (
