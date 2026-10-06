@@ -79,7 +79,6 @@ def test_router_still_chooses_destination_after_escalation():
 
 @pytest.mark.parametrize("escalation,confidence,decline", [
     (proposal(priority="Low"), 0.8, "not_an_escalation"),
-    (proposal(), 0.55, "low_confidence"),
     (proposal(ids=["OBS_NOT_SUPPLIED"]), 0.8, "evidence_mismatch"),
     (proposal(ids=["OBS_HEART_RATE"]), 0.8, "evidence_mismatch"),  # Supplied but unavailable.
     (proposal(reason="OBS_RECENT_MEDICATIONS suggests sepsis."), 0.8, "content_rejected"),

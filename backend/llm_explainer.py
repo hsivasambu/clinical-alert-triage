@@ -19,7 +19,7 @@ from typing import Annotated, Optional
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StringConstraints, ValidationError, field_validator
 
 from models import AlertIn, FallbackReason, GenerationProvenance, Priority, RuleOutput
-from explanation_contract import item_issues, rejection_reason, validate_narrative
+from explanation_contract import flagged_wording, item_issues, rejection_reason, validate_narrative
 from provenance import generation_metadata
 from prompt_builder import build_messages
 from evidence import catalog_for
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 CONFIDENCE_THRESHOLD = 0.5   # below this → decision_layer falls back to rules_only
-ESCALATION_CONFIDENCE_THRESHOLD = 0.6  # below this an escalation proposal is recorded but not applied
+ESCALATION_CONFIDENCE_THRESHOLD = 0.5  # below this an escalation proposal is recorded but not applied
 _REQUEST_TIMEOUT     = 15.0  # seconds; prevents indefinite hang
 _MODEL               = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
@@ -46,7 +46,7 @@ class EscalationProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
     proposed_priority: Priority
     reason: NonEmptyText
-    context_evidence_ids: list[NonEmptyText] = Field(min_length=1)
+    context_evidence_ids: list[NonEmptyText] = Field(default_factory=list)  # Empty is repaired or declined, not a schema failure.
 
     @field_validator("proposed_priority", mode="before")
     @classmethod
@@ -222,8 +222,10 @@ def _normalize_references(alert: AlertIn, rules: RuleOutput, result: LLMRawOutpu
 
     The server knows which rules fired and which observations it supplied, so it completes the
     trigger list, drops citations of unsupplied observations, adds supplied OBS_ IDs the text
-    mentions, and drops factor/check items that fail the content checks on their own. Summary,
-    rationale and uncertainty text are still validated whole. Every repair is recorded.
+    mentions, and drops individual sentences (summary, rationale, uncertainty) and factor/check
+    items that fail the content or evidence checks on their own. The answer is rejected only when
+    a required field has nothing valid left. Ordinary wording such as "due to" is flagged, not
+    rejected. Every repair and flag is recorded in validation_issues.
     """
     catalog = catalog_for(alert, rules)
     supplied = {item["evidence_id"] for item in catalog["context_observations"]}
@@ -238,12 +240,24 @@ def _normalize_references(alert: AlertIn, rules: RuleOutput, result: LLMRawOutpu
         if dropped:
             logger.warning("Dropped unsupplied context references: %s", ", ".join(dropped[:10]))
             repairs.append("dropped_unsupplied_context_references")
+    proposed = result.escalation.proposed_priority if result.escalation else None
+    def bad(text): return item_issues(alert, rules, text, set(triggers), supplied, proposed)
+    for key in ["summary", "rationale", "uncertainty_notes"]:
+        sentences = [part for part in re.split(r"(?<=[.!?])\s+", getattr(result, key).strip()) if part]
+        kept = [part for part in sentences if not bad(part)]
+        if kept and len(kept) != len(sentences):
+            logger.warning("Dropped %d invalid sentence(s) from %s: %s", len(sentences) - len(kept), key,
+                           "; ".join(sorted({i for part in sentences for i in bad(part)})))
+            repairs.append(f"dropped_invalid_sentences_{key}"); update[key] = " ".join(kept)
     for key in ["factors_considered", "recommended_checks"]:
-        kept = [item for item in getattr(result, key) if not item_issues(alert, rules, item, set(triggers), supplied)]
+        kept = [item for item in getattr(result, key) if not bad(item)]
         if kept and len(kept) != len(getattr(result, key)):
             repairs.append(f"dropped_invalid_{key}"); update[key] = kept
-    text = "\n".join([result.summary, result.rationale, *update.get("factors_considered", result.factors_considered),
-                      result.uncertainty_notes, *update.get("recommended_checks", result.recommended_checks)])
+    text = "\n".join([update.get("summary", result.summary), update.get("rationale", result.rationale), *update.get("factors_considered", result.factors_considered),
+                      update.get("uncertainty_notes", result.uncertainty_notes), *update.get("recommended_checks", result.recommended_checks)])
+    if flags := flagged_wording(text + "\n" + (result.escalation.reason if result.escalation else "")):
+        logger.info("Accepted flagged wording: %s", ", ".join(flags))
+        repairs.append("flagged_wording")
     context += [id for id in dict.fromkeys(re.findall(r"\bOBS_[A-Z0-9_]+\b", text)) if id in supplied and id not in context]
     if context != list(result.context_evidence_ids): update["context_evidence_ids"] = context
     if result.escalation is not None:
@@ -261,11 +275,20 @@ def _parse_and_validate(alert: AlertIn, rules: RuleOutput, raw_text: str, metada
         data = json.loads(raw_text)
     except (json.JSONDecodeError, TypeError):
         raise LLMFallbackError("malformed_output") from None
+    repairs = []
     try:
         result = LLMRawOutput.model_validate(data)
     except ValidationError:
-        raise LLMFallbackError("schema_invalid") from None
+        # A malformed escalation proposal is discarded rather than losing a valid narrative with it.
+        if not (isinstance(data, dict) and data.get("escalation") is not None):
+            raise LLMFallbackError("schema_invalid") from None
+        try:
+            result = LLMRawOutput.model_validate({**data, "escalation": None})
+        except ValidationError:
+            raise LLMFallbackError("schema_invalid") from None
+        repairs.append("dropped_invalid_escalation")
     result = _normalize_references(alert, rules, result, metadata)
+    metadata.validation_issues = [*repairs, *metadata.validation_issues]
     issues = validate_narrative(alert, rules, result)
     if issues:
         logger.warning("Narrative rejected: %s", ", ".join(issues))

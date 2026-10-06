@@ -13,17 +13,23 @@ from router import Routes
 
 logger = logging.getLogger(__name__)
 
-VALIDATION_VERSION = "evidence-contract-v4"
-_CLINICAL = (r"diagnos\w*|differential|probable cause|likely cause|caused by|due to|secondary to|consistent with|"
-    r"suggests? (?:sepsis|infection|arrhythmia)|sepsis|hypox(?:emia|aemia)|arrhythmia|"
-    r"treat\w*|administer\w*|prescrib\w*|dosage|intubat\w*|"
+VALIDATION_VERSION = "evidence-contract-v5"
+# Hard patterns reject: diagnoses, causal clinical claims, treatment directives, and any argument
+# for lowering or rerouting the decision. A sentence or list item that hits one is dropped first
+# (llm_explainer); the answer is rejected only when a required field has nothing left.
+_CLINICAL = (r"diagnos\w*|differential|probable cause|likely cause|caused by|"
+    r"suggests? (?:sepsis|infection|arrhythmia)|sepsis(?![- ]screen)|hypox(?:emia|aemia)|arrhythmia|"
+    r"administer\w*|prescrib\w*|dosage|intubat\w*|treat(?:ment)? (?:with|for|of)|"
     r"(?:give|start|increase|decrease|stop) (?:oxygen|fluids|antibiotics|medication|insulin|heparin)")
-_DECISION = (r"(?:should|recommend|must|need to) (?:escalate|downgrade|upgrade|reroute|route|transfer|change)|"
-    r"(?:change|override|raise|lower|increase|decrease) (?:the )?(?:priority|severity|routing|route)")
-# Narrative text explains the deterministic decision and may not argue for another one.
+_DECISION = (r"(?:should|recommend|must|need to) (?:downgrade|reroute|route|transfer)|"
+    r"(?:lower|decrease|reduce) (?:the )?(?:priority|severity)|(?:change|override) (?:the )?(?:routing|route)")
 PROHIBITED = re.compile(rf"\b(?:{_CLINICAL}|{_DECISION})\b", re.I)
 # An escalation proposal is decision language by design, but still may not diagnose or treat.
 CLINICAL_PROHIBITED = re.compile(rf"\b(?:{_CLINICAL})\b", re.I)
+# Ordinary wording that is recorded as a flag on an accepted answer, never a rejection.
+FLAGGED = re.compile(r"\b(?:due to|secondary to|consistent with|"
+    r"(?:should|recommend\w*|must|need to) (?:escalat\w*|upgrad\w*|rais\w*)|"
+    r"(?:raise|increase|change|override|escalate) (?:the )?(?:priority|severity))\b", re.I)
 MEASUREMENTS = {
     "heart_rate": r"(?:heart rate|HR)", "spo2": r"(?:SpO2|SpO₂|oxygen saturation)",
     "respiratory_rate": r"(?:respiratory rate|RR)", "temperature": r"(?:temperature|temp)",
@@ -41,23 +47,38 @@ def validate_narrative(alert: AlertIn, rules: RuleOutput, output) -> list[str]:
     context = set(output.context_evidence_ids)
     issues = []
     if refs != triggers: issues.append("trigger_references_mismatch")
-    if not context or not context.issubset(observations): issues.append("context_references_mismatch")
+    if not context.issubset(observations): issues.append("context_references_mismatch")
     if len(refs) != len(output.triggering_rule_ids) or len(context) != len(output.context_evidence_ids): issues.append("duplicate_evidence_references")
     text = "\n".join([output.summary, output.rationale, *output.factors_considered, output.uncertainty_notes, *output.recommended_checks])
     if found := PROHIBITED.search(text):
         logger.warning("Narrative rejected for prohibited phrase: %r", found.group(0))
         issues.append("prohibited_content_pattern")
     issues += _evidence_issues(text, catalog, refs, context)
-    decision = catalog["deterministic_decision"]
+    issues += _contradictions(text, catalog, _proposed(output))
+    return sorted(set(issues))
+
+
+def _contradictions(text: str, catalog: dict, proposed=None) -> list[str]:
+    """Priority/route mentions must match the decision, or the one-level-up decision an escalation proposes."""
+    issues, decision = [], catalog["deterministic_decision"]
+    priorities, routes = {decision["priority"].lower()}, {decision["route"]}
+    if proposed is not None:  # Only the one-level-up decision the escalation could actually produce.
+        order = ["Low", "Medium", "High", "Critical"]
+        step = order[min(order.index(decision["priority"]) + 1, len(order) - 1)]
+        priorities.add(step.lower()); routes.add(catalog["escalated_route"][step])
     for match in re.finditer(r"\b(Critical|High|Medium|Low)\s+(?:priority|severity)\b|\bpriority\s*(?:is|:|=|of)?\s*(Critical|High|Medium|Low)\b", text, re.I):
-        if (match.group(1) or match.group(2)).lower() != decision["priority"].lower(): issues.append("priority_contradiction")
+        if (match.group(1) or match.group(2)).lower() not in priorities: issues.append("priority_contradiction")
     route_spans = []
     for route in sorted({v for k, v in vars(Routes).items() if k.isupper()}, key=len, reverse=True):
         for match in re.finditer(re.escape(route), text, re.I):
             if any(a <= match.start() and match.end() <= b for a, b in route_spans): continue
             route_spans.append(match.span())
-            if route != decision["route"]: issues.append("route_contradiction")
-    return sorted(set(issues))
+            if route not in routes: issues.append("route_contradiction")
+    return issues
+
+
+def flagged_wording(text: str) -> list[str]:
+    return sorted({m.group(0).lower() for m in FLAGGED.finditer(text)})
 
 
 def _evidence_issues(text: str, catalog: dict, refs: set, context: set) -> list[str]:
@@ -112,11 +133,16 @@ def _evidence_issues(text: str, catalog: dict, refs: set, context: set) -> list[
     return issues
 
 
-def item_issues(alert: AlertIn, rules: RuleOutput, text: str, refs: set, context: set) -> list[str]:
-    """Checks for one narrative list item, so a bad item can be dropped instead of rejecting the answer."""
+def _proposed(output):
+    escalation = getattr(output, "escalation", None)
+    return escalation.proposed_priority if escalation is not None else None
+
+
+def item_issues(alert: AlertIn, rules: RuleOutput, text: str, refs: set, context: set, proposed=None) -> list[str]:
+    """Checks for one sentence or list item, so a bad one can be dropped instead of rejecting the answer."""
     catalog = catalog_for(alert, rules)
     issues = ["prohibited_content_pattern"] if PROHIBITED.search(text) else []
-    return issues + _evidence_issues(text, catalog, refs, context)
+    return issues + _evidence_issues(text, catalog, refs, context) + _contradictions(text, catalog, proposed)
 
 
 def validate_escalation(alert: AlertIn, rules: RuleOutput, escalation) -> list[str]:
@@ -126,7 +152,7 @@ def validate_escalation(alert: AlertIn, rules: RuleOutput, escalation) -> list[s
     observations = {item["evidence_id"]: item for item in catalog["context_observations"]}
     context = set(escalation.context_evidence_ids)
     issues = []
-    if not context or not context.issubset({id for id, item in observations.items() if item["available"]}): issues.append("context_references_mismatch")
+    if not context or not context.issubset({id for id, item in observations.items() if item["available"]}): issues.append("context_references_mismatch")  # Escalation must cite context.
     if CLINICAL_PROHIBITED.search(escalation.reason): issues.append("prohibited_content_pattern")
     issues += _evidence_issues(escalation.reason, catalog, triggers, context)
     return sorted(set(issues))
