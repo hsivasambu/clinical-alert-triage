@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Annotated, Optional
@@ -21,6 +22,7 @@ from models import AlertIn, FallbackReason, GenerationProvenance, Priority, Rule
 from explanation_contract import rejection_reason, validate_narrative
 from provenance import generation_metadata
 from prompt_builder import build_messages
+from evidence import catalog_for
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +217,14 @@ def _call_llm(alert: AlertIn, rule_output: RuleOutput, metadata: GenerationProve
     return _parse_and_validate(alert, rule_output, raw_text, metadata)
 
 
+def _cite_inline_observations(alert: AlertIn, rules: RuleOutput, result: LLMRawOutput) -> LLMRawOutput:
+    """Add supplied OBS_ IDs the narrative mentions but forgot to list; unknown IDs still reject."""
+    supplied = {item["evidence_id"] for item in catalog_for(alert, rules)["context_observations"]}
+    text = "\n".join([result.summary, result.rationale, *result.factors_considered, result.uncertainty_notes, *result.recommended_checks])
+    missing = [id for id in dict.fromkeys(re.findall(r"\bOBS_[A-Z0-9_]+\b", text)) if id in supplied and id not in result.context_evidence_ids]
+    return result.model_copy(update={"context_evidence_ids": [*result.context_evidence_ids, *missing]}) if missing else result
+
+
 def _parse_and_validate(alert: AlertIn, rules: RuleOutput, raw_text: str, metadata: GenerationProvenance) -> LLMRawOutput:
     try:
         data = json.loads(raw_text)
@@ -224,6 +234,7 @@ def _parse_and_validate(alert: AlertIn, rules: RuleOutput, raw_text: str, metada
         result = LLMRawOutput.model_validate(data)
     except ValidationError:
         raise LLMFallbackError("schema_invalid") from None
+    result = _cite_inline_observations(alert, rules, result)
     issues = validate_narrative(alert, rules, result)
     if issues:
         metadata.validation_issues = issues

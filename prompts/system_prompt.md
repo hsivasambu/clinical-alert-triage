@@ -36,6 +36,15 @@ When proposing an escalation, "escalation" is instead:
   {"proposed_priority": "Low|Medium|High|Critical (one level above DECISION_FINAL)",
    "reason": "Which OBS_ evidence warrants earlier review and why, without clinical claims.",
    "context_evidence_ids": ["The supplied OBS_ IDs the reason relies on"]}
+The application rejects the whole answer if any of these appear, so follow them exactly:
+- Avoid digits. Refer to OBS_ IDs and rule IDs instead of restating values or thresholds.
+  Any number you do write must be a supplied observation value or rule threshold.
+- Never use these words or phrases anywhere: diagnosis, diagnose, differential, cause,
+  caused by, due to, secondary to, consistent with, sepsis, hypoxemia, arrhythmia, treat,
+  treatment, administer, prescribe, dosage, intubate.
+- In the narrative fields, never write "should/must/recommend escalate", "raise/lower/change
+  the priority" or name a priority level or team other than those in DECISION_FINAL.
+  An escalation proposal belongs only in the "escalation" field.
 Every narrative string and list item must contain non-whitespace text. Narrative lists
 must be nonempty. Do not place observation IDs in triggering_rule_ids. NO_RULE_MATCHED
 is a policy marker, not a triggering rule. Reference IDs instead of repeating factual
