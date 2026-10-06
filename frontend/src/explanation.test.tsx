@@ -5,7 +5,7 @@ import { ExplanationPanel } from './components/ExplanationPanel'
 import { FALLBACK_LABELS } from './fallbackLabels'
 import { buildAlert } from './simulator/buildAlert'
 import { PRESETS } from './simulator/presets'
-import type { FallbackReason, TriageResult } from './types'
+import type { AIAdjustment, FallbackReason, TriageResult } from './types'
 afterEach(cleanup)
 const result = fixture as TriageResult
 const panel = (reason: FallbackReason | null = 'provider_timeout') => <ExplanationPanel alert={result.alert} ruleOutput={result.rule_output} finalPriority={result.final_priority} finalRoute={result.final_route} explanation={{ ...result.explanation, fallback_reason: reason }} />
@@ -29,6 +29,22 @@ describe('recorded deterministic explanation', () => {
   it('does not guess why a legacy record fell back', () => {
     const { container } = render(panel(null))
     expect(container.querySelector('.fallback-label')?.textContent).toContain('Reason not recorded (legacy record)')
+  })
+})
+describe('AI-supported decision', () => {
+  const adjustment: Omit<AIAdjustment, 'status'> = { proposed_priority: 'High', baseline_priority: 'Low', applied_priority: 'Medium', baseline_route: 'Bedside Nurse', applied_route: 'Bedside Nurse',
+    reason: 'OBS_FALL_RISK_SCORE warrants earlier review.', context_evidence_ids: ['OBS_FALL_RISK_SCORE'] }
+  const withAdjustment = (extra: Partial<AIAdjustment> & Pick<AIAdjustment, 'status'>) => <ExplanationPanel alert={result.alert} ruleOutput={result.rule_output} finalPriority="Medium" finalRoute="Bedside Nurse"
+    explanation={{ ...result.explanation, explanation_mode: 'hybrid', ai_adjustment: { ...adjustment, ...extra } }} />
+  it('shows an applied escalation and its one-level cap', () => {
+    const { container } = render(withAdjustment({ status: 'applied' }))
+    const block = container.querySelector('.ai-adjustment')?.textContent
+    expect(block).toContain('Priority raised from Low to Medium (capped at one level above the rules)')
+    expect(block).toContain('OBS_FALL_RISK_SCORE')
+  })
+  it('shows why a proposal was declined', () => {
+    const { container } = render(withAdjustment({ status: 'declined', applied_priority: 'Low', decline_reason: 'low_confidence' }))
+    expect(container.querySelector('.ai-adjustment')?.textContent).toContain('Not applied: the model\'s confidence was below the escalation threshold')
   })
 })
 describe('simulator numeric serialization', () => {

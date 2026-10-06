@@ -78,7 +78,7 @@ def test_correct_measurements_and_separate_evidence_are_accepted():
     assert {o["evidence_id"] for o in catalog["context_observations"]} >= {"OBS_SPO2", "OBS_HEART_RATE"}
     system, prompt = build_messages(alert, rules)
     assert catalog["deterministic_decision"]["route"] in prompt
-    assert "must not propose" in system.lower()
+    assert "do not propose diagnoses" in system.lower()
     assert "rule_confidence" not in prompt
     assert generation_metadata(alert, rules).rendered_prompt_hash == generation_metadata(alert, rules).rendered_prompt_hash
 

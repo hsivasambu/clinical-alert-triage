@@ -15,9 +15,9 @@ import time
 from dataclasses import dataclass
 from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StringConstraints, ValidationError, field_validator
 
-from models import AlertIn, FallbackReason, GenerationProvenance, RuleOutput
+from models import AlertIn, FallbackReason, GenerationProvenance, Priority, RuleOutput
 from explanation_contract import rejection_reason, validate_narrative
 from provenance import generation_metadata
 from prompt_builder import build_messages
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 CONFIDENCE_THRESHOLD = 0.5   # below this → decision_layer falls back to rules_only
+ESCALATION_CONFIDENCE_THRESHOLD = 0.6  # below this an escalation proposal is recorded but not applied
 _REQUEST_TIMEOUT     = 15.0  # seconds; prevents indefinite hang
 _MODEL               = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
@@ -39,6 +40,18 @@ _MODEL               = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
 NonEmptyText = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 
+class EscalationProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    proposed_priority: Priority
+    reason: NonEmptyText
+    context_evidence_ids: list[NonEmptyText] = Field(min_length=1)
+
+    @field_validator("proposed_priority", mode="before")
+    @classmethod
+    def _title_case(cls, value):
+        return value.strip().title() if isinstance(value, str) else value
+
+
 class LLMRawOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: NonEmptyText
@@ -48,6 +61,7 @@ class LLMRawOutput(BaseModel):
     recommended_checks: list[NonEmptyText] = Field(min_length=1)
     triggering_rule_ids: list[NonEmptyText]
     context_evidence_ids: list[NonEmptyText]
+    escalation: Optional[EscalationProposal] = None
     _self_reported_confidence: Optional[float] = PrivateAttr(default=None)
     _confidence_cap_value: Optional[float] = PrivateAttr(default=None)
     _confidence_cap_reason: Optional[str] = PrivateAttr(default=None)

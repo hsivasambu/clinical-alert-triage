@@ -173,6 +173,19 @@ class GenerationProvenance(BaseModel):
     request_correlation_id: Optional[str] = None
 
 
+class AIAdjustment(BaseModel):
+    """Recorded outcome of a model escalation proposal. Escalation only, one level at most."""
+    status: Literal["applied", "declined"]
+    proposed_priority: Priority
+    baseline_priority: Priority
+    applied_priority: Priority
+    baseline_route: str
+    applied_route: str
+    reason: str
+    context_evidence_ids: List[str] = Field(default_factory=list)
+    decline_reason: Optional[str] = None
+
+
 class ExplanationOutput(BaseModel):
     """Recorded narrative plus deterministic trace and optional LLM fallback reason.
 
@@ -196,6 +209,7 @@ class ExplanationOutput(BaseModel):
     rule_evidence: List[RuleEvidence] = Field(default_factory=list)
     fallback_reason: Optional[FallbackReason] = None
     explanation_version: Optional[str] = None
+    ai_adjustment: Optional[AIAdjustment] = None
 
 
 # ---------------------------------------------------------------------------

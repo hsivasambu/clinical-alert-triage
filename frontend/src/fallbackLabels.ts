@@ -1,6 +1,6 @@
 import type { FallbackReason } from './types'
 export const FALLBACK_LABELS: Record<FallbackReason, string> = {
-  llm_disabled: 'LLM disabled', provider_failure: 'Provider failure', provider_timeout: 'Provider timeout',
+  llm_disabled: 'LLM disabled (the API server has no OpenAI key or LLM_ENABLED is false)', provider_failure: 'Provider failure', provider_timeout: 'Provider timeout',
   malformed_output: 'Malformed provider response', schema_invalid: 'Provider output failed schema validation',
   low_confidence: 'LLM confidence below the explanation threshold', content_rejected: 'Provider refusal or prohibited content detected',
   evidence_mismatch: 'Narrative evidence did not match recorded input', contradiction: 'Narrative contradicted the deterministic decision',
