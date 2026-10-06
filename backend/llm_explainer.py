@@ -54,6 +54,19 @@ class EscalationProposal(BaseModel):
         return value.strip().title() if isinstance(value, str) else value
 
 
+def _escalation_or_none(value):
+    """Reads the context-review object: "recommend": false (or no proposed level) means no proposal."""
+    if not isinstance(value, dict) or "recommend" not in value:
+        return value
+    proposal = {k: v for k, v in value.items() if k != "recommend"}
+    recommend = value["recommend"]
+    if isinstance(recommend, str):
+        recommend = recommend.strip().lower() in {"true", "yes"}
+    if recommend is not True or proposal.get("proposed_priority") in (None, ""):
+        return None
+    return proposal
+
+
 class LLMRawOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: NonEmptyText
@@ -68,6 +81,11 @@ class LLMRawOutput(BaseModel):
     _confidence_cap_value: Optional[float] = PrivateAttr(default=None)
     _confidence_cap_reason: Optional[str] = PrivateAttr(default=None)
     confidence: float = Field(ge=0.0, le=1.0, strict=True, allow_inf_nan=False)
+
+    @field_validator("escalation", mode="before")
+    @classmethod
+    def _read_context_review(cls, value):
+        return _escalation_or_none(value)
 
 
 @dataclass(frozen=True)

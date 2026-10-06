@@ -48,6 +48,13 @@ ANSWERS = {
     "numbers_and_time_windows": answer(factors_considered=["2 prior alerts in 24h (OBS_PRIOR_ALERTS_24H).", "Fall-risk score of 72 exceeds the usual threshold of 45.", "Patient attempted to walk within 10 minutes of the call."]),
     "missing_escalation_citations": answer(escalation={"proposed_priority": "medium", "reason": "OBS_FALL_RISK_SCORE and OBS_RECENT_MEDICATIONS warrant earlier review.", "context_evidence_ids": []}),
     "treated_as_wording": answer(uncertainty_notes="Missing vital signs are treated as unavailable, not normal."),
+    # Context-review shape the v5 prompt asks for.
+    "context_review_object": answer(escalation={"recommend": True, **ESCALATION}),
+    "context_review_loose_types": answer(escalation={"recommend": "true", "proposed_priority": "medium",
+        "reason": "Lorazepam and oxycodone (OBS_RECENT_MEDICATIONS), a fall-risk score of 72 (OBS_FALL_RISK_SCORE), 2 prior alerts (OBS_PRIOR_ALERTS_24H) and an unassisted attempt to get up while dizzy (OBS_MESSAGE_TEXT) make a delay riskier.",
+        "context_evidence_ids": ["OBS_RECENT_MEDICATIONS", "OBS_FALL_RISK_SCORE", "OBS_PRIOR_ALERTS_24H", "OBS_MESSAGE_TEXT"]}),
+    "narrative_mentions_context_review": answer(escalation={"recommend": True, **ESCALATION},
+        rationale="NURSE_CALL_SINGLE matched, so the rules kept the routine call path (DECISION_FINAL). The context review separately weighs OBS_RECENT_MEDICATIONS, OBS_FALL_RISK_SCORE and OBS_MESSAGE_TEXT, which the rules do not test."),
 }
 
 
@@ -96,6 +103,31 @@ def test_unusable_answers_still_fall_back(monkeypatch, raw):
     result = run(monkeypatch, raw)
     assert result.explanation.explanation_mode == ExplanationMode.rules_only
     assert result.final_priority == Priority.low
+
+
+@pytest.mark.parametrize("escalation", [
+    {"recommend": False, "proposed_priority": None, "reason": "The context gives no reason to see this alert sooner.", "context_evidence_ids": []},
+    {"recommend": "false", "proposed_priority": "Medium", "reason": "Not needed.", "context_evidence_ids": []},
+    {"recommend": True, "proposed_priority": None, "reason": "Unclear.", "context_evidence_ids": []},
+    None,
+])
+def test_no_recommendation_keeps_ai_narrative_and_rules_priority(monkeypatch, escalation):
+    result = run(monkeypatch, answer(escalation=escalation))
+    assert result.explanation.explanation_mode == ExplanationMode.hybrid, result.provenance.validation_issues
+    assert result.explanation.ai_adjustment is None
+    assert result.final_priority == Priority.low
+
+
+def test_prompt_asks_for_context_review():
+    from prompt_builder import PROMPT_VERSION, build_messages
+    alert = demo_alert()
+    system, user = build_messages(alert, evaluate(alert))
+    assert PROMPT_VERSION == "explanation-contract-v5"
+    assert "CONTEXT REVIEW" in system and '"recommend"' in system and "Context does not create rules" not in system
+    assert system.index('"escalation"') < system.index('"summary"')
+    for obs in ["OBS_RECENT_MEDICATIONS", "OBS_FALL_RISK_SCORE", "OBS_PRIOR_ALERTS_24H", "OBS_MESSAGE_TEXT"]:
+        assert obs in system and obs in user
+    assert "review the patient context" in user
 
 
 def test_narrative_may_not_claim_more_than_one_level(monkeypatch):
