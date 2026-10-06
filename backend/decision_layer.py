@@ -3,12 +3,15 @@ Decision Layer / Guardrails (Layer 4).
 
 Non-negotiable safety constraints from CLAUDE.md:
   1. final_priority >= baseline_priority (rules floor is inviolable).
-  2. LLM has explainability authority only - it cannot change priority or route.
+  2. The LLM may propose a limited escalation only: at most one priority level
+     above the rules baseline, citing supplied context evidence, with an
+     accepted narrative and sufficient confidence. It can never downgrade, and
+     the router still chooses the destination for the resulting priority.
   3. If LLM output is absent, invalid, or confidence < threshold -> rules_only.
-  4. Every decision is auditable via explanation.rule_trace.
+  4. Every decision is auditable via explanation.rule_trace and
+     explanation.ai_adjustment, which records applied and declined proposals.
 
-This module accepts an optional LLM explainability payload, but the final
-priority and route still come only from the rules engine and router.
+The final route always comes from the deterministic router.
 """
 
 from __future__ import annotations
@@ -16,14 +19,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from llm_explainer import CONFIDENCE_THRESHOLD, LLMOutcome, LLMRawOutput
+from llm_explainer import CONFIDENCE_THRESHOLD, ESCALATION_CONFIDENCE_THRESHOLD, LLMOutcome, LLMRawOutput
 import deterministic_explanation
 from evidence import observations_for
-from explanation_contract import rejection_reason, validate_narrative
+from explanation_contract import rejection_reason, validate_escalation, validate_narrative
 from provenance import generation_metadata
 from rules_engine import evidence_for
 from models import (
+    PRIORITY_RANK,
+    AIAdjustment,
     AlertIn,
+    Priority,
     ExplanationMode,
     ExplanationOutput,
     RuleOutput,
@@ -64,6 +70,25 @@ def _build_explanation(alert: AlertIn, rules: RuleOutput, route: str, routing_re
         rule_evidence=evidence_for(alert, rules), explanation_version="validated-llm-v2")
 
 
+def _ai_adjustment(alert: AlertIn, rules: RuleOutput, output: LLMRawOutput, baseline_route: str) -> AIAdjustment:
+    """Bound a model escalation proposal: one level up at most, never down."""
+    proposal = output.escalation
+    baseline = rules.baseline_priority
+    by_rank = {rank: priority for priority, rank in PRIORITY_RANK.items()}
+    decline = None
+    if PRIORITY_RANK[proposal.proposed_priority] <= PRIORITY_RANK[baseline]:
+        decline = "not_an_escalation"  # Downgrades and no-ops never change the rules decision.
+    elif output.confidence < ESCALATION_CONFIDENCE_THRESHOLD:
+        decline = "low_confidence"
+    elif issues := validate_escalation(alert, rules, proposal):
+        decline = rejection_reason(issues)
+    applied = baseline if decline else Priority(by_rank[PRIORITY_RANK[baseline] + 1])
+    route = resolve_route_with_reason(alert, applied, rules.suggested_route)[0]
+    return AIAdjustment(status="declined" if decline else "applied", proposed_priority=proposal.proposed_priority,
+        baseline_priority=baseline, applied_priority=applied, baseline_route=baseline_route, applied_route=route,
+        reason=proposal.reason, context_evidence_ids=list(proposal.context_evidence_ids), decline_reason=decline)
+
+
 def apply(
     alert: AlertIn,
     rule_output: RuleOutput,
@@ -72,8 +97,8 @@ def apply(
     """
     Enforce all guardrails and return the final TriageResult.
 
-    The LLM has no authority over priority or routing. Final routing always
-    comes from router.resolve_route() using the rules-derived baseline.
+    The LLM may raise priority by one level (see _ai_adjustment) but never lower
+    it. Final routing always comes from router.resolve_route().
     """
     final_priority = rule_output.baseline_priority
     final_route, routing_reason = resolve_route_with_reason(alert, final_priority, rule_output.suggested_route)
@@ -89,6 +114,11 @@ def apply(
         else:
             outcome = LLMOutcome(output=outcome.output, fallback_reason=outcome.fallback_reason, provenance=metadata)
     explanation = _build_explanation(alert, rule_output, final_route, routing_reason, outcome)
+    if explanation.explanation_mode == ExplanationMode.hybrid and outcome.output.escalation is not None:
+        adjustment = _ai_adjustment(alert, rule_output, outcome.output, final_route)
+        explanation.ai_adjustment = adjustment
+        if adjustment.status == "applied":
+            final_priority, final_route = adjustment.applied_priority, adjustment.applied_route
     metadata.fallback_reason = explanation.fallback_reason
     if metadata.validation_outcome == "local_caller":
         metadata.validation_outcome = "low_confidence" if explanation.fallback_reason == "low_confidence" else "accepted_by_practical_checks" if explanation.explanation_mode == ExplanationMode.hybrid else "rejected"

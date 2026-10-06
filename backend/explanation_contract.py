@@ -10,20 +10,25 @@ from evidence import catalog_for
 from models import AlertIn, RuleOutput
 from router import Routes
 
-VALIDATION_VERSION = "evidence-contract-v1"
-PROHIBITED = re.compile(
-    r"\b(?:diagnos\w*|differential|probable cause|likely cause|caused by|due to|secondary to|consistent with|"
+VALIDATION_VERSION = "evidence-contract-v2"
+_CLINICAL = (r"diagnos\w*|differential|probable cause|likely cause|caused by|due to|secondary to|consistent with|"
     r"suggests? (?:sepsis|infection|arrhythmia)|sepsis|hypox(?:emia|aemia)|arrhythmia|"
     r"treat\w*|administer\w*|prescrib\w*|dosage|intubat\w*|"
-    r"(?:give|start|increase|decrease|stop) (?:oxygen|fluids|antibiotics|medication|insulin|heparin)|"
-    r"(?:should|recommend|must|need to) (?:escalate|downgrade|upgrade|reroute|route|transfer|change)|"
-    r"(?:change|override|raise|lower|increase|decrease) (?:the )?(?:priority|severity|routing|route))\b", re.I)
+    r"(?:give|start|increase|decrease|stop) (?:oxygen|fluids|antibiotics|medication|insulin|heparin)")
+_DECISION = (r"(?:should|recommend|must|need to) (?:escalate|downgrade|upgrade|reroute|route|transfer|change)|"
+    r"(?:change|override|raise|lower|increase|decrease) (?:the )?(?:priority|severity|routing|route)")
+# Narrative text explains the deterministic decision and may not argue for another one.
+PROHIBITED = re.compile(rf"\b(?:{_CLINICAL}|{_DECISION})\b", re.I)
+# An escalation proposal is decision language by design, but still may not diagnose or treat.
+CLINICAL_PROHIBITED = re.compile(rf"\b(?:{_CLINICAL})\b", re.I)
 MEASUREMENTS = {
     "heart_rate": r"(?:heart rate|HR)", "spo2": r"(?:SpO2|SpO₂|oxygen saturation)",
     "respiratory_rate": r"(?:respiratory rate|RR)", "temperature": r"(?:temperature|temp)",
     "blood_pressure_systolic": r"(?:systolic(?: pressure)?|SBP)", "blood_pressure_diastolic": r"(?:diastolic(?: pressure)?|DBP)",
     "repeat_count": r"(?:repeat count)", "fall_risk_score": r"(?:fall[- ]risk score)",
 }
+
+COUNT_OBSERVATIONS = ("OBS_PRIOR_ALERTS_24H", "OBS_REPEAT_COUNT", "OBS_FALL_RISK_SCORE")
 
 
 def validate_narrative(alert: AlertIn, rules: RuleOutput, output) -> list[str]:
@@ -38,7 +43,22 @@ def validate_narrative(alert: AlertIn, rules: RuleOutput, output) -> list[str]:
     if len(refs) != len(output.triggering_rule_ids) or len(context) != len(output.context_evidence_ids): issues.append("duplicate_evidence_references")
     text = "\n".join([output.summary, output.rationale, *output.factors_considered, output.uncertainty_notes, *output.recommended_checks])
     if PROHIBITED.search(text): issues.append("prohibited_content_pattern")
-    known_ids = triggers | set(observations) | set(catalog["policy_markers"]) | {"DECISION_FINAL"}
+    issues += _evidence_issues(text, triggers, refs, observations, context, set(catalog["policy_markers"]))
+    decision = catalog["deterministic_decision"]
+    for match in re.finditer(r"\b(Critical|High|Medium|Low)\s+(?:priority|severity)\b|\bpriority\s*(?:is|:|=|of)?\s*(Critical|High|Medium|Low)\b", text, re.I):
+        if (match.group(1) or match.group(2)).lower() != decision["priority"].lower(): issues.append("priority_contradiction")
+    route_spans = []
+    for route in sorted({v for k, v in vars(Routes).items() if k.isupper()}, key=len, reverse=True):
+        for match in re.finditer(re.escape(route), text, re.I):
+            if any(a <= match.start() and match.end() <= b for a, b in route_spans): continue
+            route_spans.append(match.span())
+            if route != decision["route"]: issues.append("route_contradiction")
+    return sorted(set(issues))
+
+
+def _evidence_issues(text: str, triggers: set, refs: set, observations: dict, context: set, policy_markers: set) -> list[str]:
+    issues = []
+    known_ids = triggers | set(observations) | policy_markers | {"DECISION_FINAL"}
     for id in re.findall(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b", text):
         if id not in known_ids: issues.append("unknown_inline_evidence_id")
         elif id in triggers and id not in refs: issues.append("uncited_inline_rule")
@@ -60,17 +80,26 @@ def validate_narrative(alert: AlertIn, rules: RuleOutput, output) -> list[str]:
                 aliases = {"beats/min": "bpm", "breaths/min": "/min"}
                 if aliases.get(normalized, normalized) != units.get(key, "").lower(): issues.append("measurement_unit_mismatch")
             covered.append(match.span(1))
+    # Unlabeled counts are accepted only when they equal a cited count observation ("2 prior alerts").
+    counts = {observations[id]["value"] for id in COUNT_OBSERVATIONS if id in observations and id in context and observations[id]["available"]}
     for match in re.finditer(r"(?<![\w])[-+]?\d+(?:\.\d+)?", text):
-        if not any(start <= match.start() and match.end() <= end for start, end in covered): issues.append("unverified_numeric_claim")
-    decision = catalog["deterministic_decision"]
-    for match in re.finditer(r"\b(Critical|High|Medium|Low)\s+(?:priority|severity)\b|\bpriority\s*(?:is|:|=|of)?\s*(Critical|High|Medium|Low)\b", text, re.I):
-        if (match.group(1) or match.group(2)).lower() != decision["priority"].lower(): issues.append("priority_contradiction")
-    route_spans = []
-    for route in sorted({v for k, v in vars(Routes).items() if k.isupper()}, key=len, reverse=True):
-        for match in re.finditer(re.escape(route), text, re.I):
-            if any(a <= match.start() and match.end() <= b for a, b in route_spans): continue
-            route_spans.append(match.span())
-            if route != decision["route"]: issues.append("route_contradiction")
+        if any(start <= match.start() and match.end() <= end for start, end in covered): continue
+        if float(match.group(0)) in counts: continue
+        if match.group(0) == "24" and re.match(r"(?:h\b|-? ?hours?\b|-hour\b)", text[match.end():], re.I): continue
+        issues.append("unverified_numeric_claim")
+    return issues
+
+
+def validate_escalation(alert: AlertIn, rules: RuleOutput, escalation) -> list[str]:
+    """Evidence and content checks for an AI escalation proposal; the decision layer applies bounds."""
+    catalog = catalog_for(alert, rules)
+    triggers = {item["rule_id"] for item in catalog["triggering_rules"]}
+    observations = {item["evidence_id"]: item for item in catalog["context_observations"]}
+    context = set(escalation.context_evidence_ids)
+    issues = []
+    if not context or not context.issubset({id for id, item in observations.items() if item["available"]}): issues.append("context_references_mismatch")
+    if CLINICAL_PROHIBITED.search(escalation.reason): issues.append("prohibited_content_pattern")
+    issues += _evidence_issues(escalation.reason, triggers, triggers, observations, context, set(catalog["policy_markers"]))
     return sorted(set(issues))
 
 

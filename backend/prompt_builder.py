@@ -6,7 +6,7 @@ from string import Template
 from evidence import catalog_for
 from models import AlertIn, RuleOutput
 
-PROMPT_VERSION = "explanation-contract-v2"
+PROMPT_VERSION = "explanation-contract-v3"
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 

@@ -20,8 +20,18 @@ def observations_for(alert: AlertIn) -> list[EvidenceObservation]:
         value = getattr(alert.additional_context, key)
         if value is not None:
             rows.append(EvidenceObservation(evidence_id=f"OBS_{key.upper()}", label=key.replace("_", " "), value=value))
-    if alert.recent_context.fall_risk_score is not None:
-        rows.append(EvidenceObservation(evidence_id="OBS_FALL_RISK_SCORE", label="Fall-risk score", value=alert.recent_context.fall_risk_score))
+    ctx = alert.recent_context
+    if ctx.fall_risk_score is not None:
+        rows.append(EvidenceObservation(evidence_id="OBS_FALL_RISK_SCORE", label="Fall-risk score", value=ctx.fall_risk_score))
+    # Patient context the rules do not evaluate; the model may cite it when proposing a bounded escalation.
+    if ctx.prior_alerts_24h:
+        rows.append(EvidenceObservation(evidence_id="OBS_PRIOR_ALERTS_24H", label="Prior alerts in last 24h", value=ctx.prior_alerts_24h))
+    if ctx.recent_medications:
+        rows.append(EvidenceObservation(evidence_id="OBS_RECENT_MEDICATIONS", label="Recent medications", value=list(ctx.recent_medications)))
+    for key in ["admission_reason", "code_status"]:
+        value = getattr(ctx, key)
+        if value:
+            rows.append(EvidenceObservation(evidence_id=f"OBS_{key.upper()}", label=key.replace("_", " ").capitalize(), value=value))
     # Untrusted source context is retained separately; it cannot create rule evidence.
     for key in ["message_text", "device_type"]:
         value = getattr(alert, key)

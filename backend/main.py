@@ -366,7 +366,8 @@ def health():
 def readiness(response: Response):
     if _initialization["state"] == "unavailable": response.status_code = 503
     elif _initialization["state"] == "initializing": response.status_code = 202
-    return {**_initialization, "alert_count": len(_store)}
+    # llm_configured reports whether a key is present and generation is enabled; never the key itself.
+    return {**_initialization, "alert_count": len(_store), "llm_configured": llm_explainer.is_enabled(), "llm_model": llm_explainer._MODEL}
 
 
 @app.exception_handler(sqlite3.Error)

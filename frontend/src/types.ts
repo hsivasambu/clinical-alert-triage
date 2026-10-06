@@ -76,6 +76,17 @@ export interface GenerationProvenance {
   configured_model?: string | null; returned_model?: string | null; validation_version?: string | null; validation_outcome?: string | null
   validation_issues?: string[]; fallback_reason?: FallbackReason | null; generation_duration_ms?: number | null; request_correlation_id?: string | null
 }
+export interface AIAdjustment {
+  status: 'applied' | 'declined'
+  proposed_priority: Priority
+  baseline_priority: Priority
+  applied_priority: Priority
+  baseline_route: string
+  applied_route: string
+  reason: string
+  context_evidence_ids: string[]
+  decline_reason?: string | null
+}
 export interface ExplanationOutput {
   triggering_rule_ids?: string[]
   context_observations?: { evidence_id: string; label: string; value: unknown; unit?: string | null; available: boolean }[]
@@ -94,6 +105,7 @@ export interface ExplanationOutput {
   llm_confidence_estimate: number | null
   explanation_mode: ExplanationMode
   rule_trace: string[]
+  ai_adjustment?: AIAdjustment | null
 }
 
 export interface TriageResult {
