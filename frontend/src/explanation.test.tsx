@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import fixture from '../e2e/fallback.json'
 import { ExplanationPanel } from './components/ExplanationPanel'
+import { AIDecisionNote } from './components/AlertDetail'
 import { FALLBACK_LABELS } from './fallbackLabels'
 import { buildAlert } from './simulator/buildAlert'
 import { PRESETS } from './simulator/presets'
@@ -41,6 +42,17 @@ describe('AI-supported decision', () => {
     const block = container.querySelector('.ai-adjustment')?.textContent
     expect(block).toContain('Priority raised from Low to Medium (capped at one level above the rules)')
     expect(block).toContain('OBS_FALL_RISK_SCORE')
+  })
+  it('states an applied AI change in the decision header', () => {
+    const { container } = render(<AIDecisionNote explanation={{ ...result.explanation, explanation_mode: 'hybrid', ai_adjustment: { ...adjustment, status: 'applied' } }} />)
+    const note = container.querySelector('.ai-decision-note')?.textContent
+    expect(note).toContain('AI changed this decision')
+    expect(note).toContain('Rules: Low → AI-supported: Medium')
+    expect(note).toContain('OBS_FALL_RISK_SCORE warrants earlier review.')
+  })
+  it('says when the AI reviewed context and proposed no change', () => {
+    const { container } = render(<AIDecisionNote explanation={{ ...result.explanation, explanation_mode: 'hybrid', ai_adjustment: null }} />)
+    expect(container.textContent).toContain('proposed no change')
   })
   it('shows why a proposal was declined', () => {
     const { container } = render(withAdjustment({ status: 'declined', applied_priority: 'Low', decline_reason: 'low_confidence' }))

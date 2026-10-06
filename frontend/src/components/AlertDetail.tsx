@@ -3,10 +3,20 @@ import { fallbackLabel } from '../fallbackLabels'
 import { ALERT_TYPE_LABELS } from '../simulator/presets'
 import { isHistoricalFixture } from '../queue'
 import { VITAL_LABELS } from '../observations'
-import type { AlertAudit, TriageResult } from '../types'
+import type { AlertAudit, ExplanationOutput, TriageResult } from '../types'
 import { ExplanationPanel } from './ExplanationPanel'
 import { HumanReview } from './HumanReview'
-import { About } from './Callouts'
+import { About, Output } from './Callouts'
+// Says in the header whether the AI context review changed the rules decision.
+export function AIDecisionNote({ explanation }: { explanation: ExplanationOutput }) {
+  const a = explanation.ai_adjustment
+  if (a?.status === 'applied') return <div className="ai-decision-note"><Output kind="ai" title="AI changed this decision">
+    <p className="decision-line">Rules: <span className={`badge priority-${a.baseline_priority.toLowerCase()}`}>{a.baseline_priority}</span> → AI-supported: <span className={`badge priority-${a.applied_priority.toLowerCase()}`}>{a.applied_priority}</span></p>
+    <p>{a.reason}</p></Output></div>
+  if (a?.status === 'declined') return <p className="ai-decision-note muted small">The AI proposed {a.proposed_priority}, but it was not applied; the rules decision stands. See "AI escalation" below.</p>
+  if (explanation.explanation_mode === 'hybrid') return <p className="ai-decision-note muted small">The AI reviewed the patient context and proposed no change to the rules decision.</p>
+  return null
+}
 interface Props { result: TriageResult; audit: AlertAudit | null; reviewerId: string; onReviewerIdChange: (id: string) => void; onAuditUpdate: (audit: AlertAudit) => void }
 export function AlertDetail({ result, audit, reviewerId, onReviewerIdChange, onAuditUpdate }: Props) {
   const { alert, rule_output, explanation, final_priority, final_route } = result
@@ -20,6 +30,7 @@ export function AlertDetail({ result, audit, reviewerId, onReviewerIdChange, onA
       <p className="muted small">Alert {alert.alert_id} · Patient {alert.patient_id} · {alert.unit}</p>
       <p className="muted small">Alert time: {new Date(alert.timestamp).toLocaleString()}{isHistoricalFixture(result) ? ' · Fixed historical fixture' : ''} · Processing time: {new Date(result.processed_at).toLocaleString()}</p>
       <div className="decision-line"><span className={`badge priority-${priority.toLowerCase()}`}>{priority}</span><strong>{route}</strong><span className="badge">{review?.review_status ?? 'unreviewed'}</span></div>
+      <AIDecisionNote explanation={explanation} />
       {humanChanged && <p className="original-decision small">Original system decision: <strong>{final_priority}</strong> → {final_route}. Human version {review?.decision_version}.</p>}
     </header>
     <ExplanationPanel explanation={explanation} ruleOutput={rule_output} finalPriority={final_priority} finalRoute={final_route} alert={alert} />
