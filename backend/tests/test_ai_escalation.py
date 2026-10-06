@@ -114,3 +114,31 @@ def test_critical_baseline_cannot_be_escalated_or_downgraded():
     result = apply(alert, rules, out)
     assert result.final_priority == Priority.critical
     assert result.explanation.ai_adjustment.decline_reason == "not_an_escalation"
+
+
+@pytest.mark.parametrize("sentence,accepted", [
+    ("OBS_UNIT records 4-East Surgical.", True),  # Digits inside a supplied value.
+    ("NURSE_CALL_SINGLE matched because the repeat count is below 3.", True),  # Rule threshold.
+    ("1 rule matched: NURSE_CALL_SINGLE.", True),
+    ("OBS_FALL_RISK_SCORE is 72.", True),
+    ("OBS_UNIT records 5-East Surgical.", False),
+    ("OBS_PRIOR_ALERTS_24H shows 7 prior alerts.", False),
+    ("Review within 15 minutes.", False),
+])
+def test_numbers_must_come_from_supplied_evidence(sentence, accepted):
+    alert = nurse_call()
+    rules, out = output(alert, None, summary=sentence, context_evidence_ids=["OBS_UNIT", "OBS_PRIOR_ALERTS_24H", "OBS_FALL_RISK_SCORE"])
+    assert (validate_narrative(alert, rules, out) == []) is accepted
+
+
+def test_inline_observation_ids_are_added_to_citations():
+    import json
+    from llm_explainer import _parse_and_validate
+    from provenance import generation_metadata
+    alert = nurse_call()
+    rules = evaluate(alert)
+    raw = dict(summary="OBS_FALL_RISK_SCORE and OBS_RECENT_MEDICATIONS are recorded.", rationale="NURSE_CALL_SINGLE matched; DECISION_FINAL is recorded.",
+               factors_considered=["OBS_UNIT is recorded."], uncertainty_notes="Not verified.", recommended_checks=["Verify source."],
+               triggering_rule_ids=["NURSE_CALL_SINGLE"], context_evidence_ids=["OBS_UNIT"], confidence=0.8, escalation=None)
+    result = _parse_and_validate(alert, rules, json.dumps(raw), generation_metadata(alert, rules))
+    assert result.context_evidence_ids == ["OBS_UNIT", "OBS_FALL_RISK_SCORE", "OBS_RECENT_MEDICATIONS"]

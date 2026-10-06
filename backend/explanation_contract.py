@@ -5,12 +5,15 @@ recorded values and cite their observation ID. Rule/observation references must
 belong to the supplied catalog. Phrase patterns catch common forbidden claims;
 paraphrases, implicit causation and multilingual content can escape these checks.
 """
+import logging
 import re
 from evidence import catalog_for
 from models import AlertIn, RuleOutput
 from router import Routes
 
-VALIDATION_VERSION = "evidence-contract-v2"
+logger = logging.getLogger(__name__)
+
+VALIDATION_VERSION = "evidence-contract-v3"
 _CLINICAL = (r"diagnos\w*|differential|probable cause|likely cause|caused by|due to|secondary to|consistent with|"
     r"suggests? (?:sepsis|infection|arrhythmia)|sepsis|hypox(?:emia|aemia)|arrhythmia|"
     r"treat\w*|administer\w*|prescrib\w*|dosage|intubat\w*|"
@@ -28,7 +31,6 @@ MEASUREMENTS = {
     "repeat_count": r"(?:repeat count)", "fall_risk_score": r"(?:fall[- ]risk score)",
 }
 
-COUNT_OBSERVATIONS = ("OBS_PRIOR_ALERTS_24H", "OBS_REPEAT_COUNT", "OBS_FALL_RISK_SCORE")
 
 
 def validate_narrative(alert: AlertIn, rules: RuleOutput, output) -> list[str]:
@@ -42,8 +44,10 @@ def validate_narrative(alert: AlertIn, rules: RuleOutput, output) -> list[str]:
     if not context or not context.issubset(observations): issues.append("context_references_mismatch")
     if len(refs) != len(output.triggering_rule_ids) or len(context) != len(output.context_evidence_ids): issues.append("duplicate_evidence_references")
     text = "\n".join([output.summary, output.rationale, *output.factors_considered, output.uncertainty_notes, *output.recommended_checks])
-    if PROHIBITED.search(text): issues.append("prohibited_content_pattern")
-    issues += _evidence_issues(text, triggers, refs, observations, context, set(catalog["policy_markers"]))
+    if found := PROHIBITED.search(text):
+        logger.warning("Narrative rejected for prohibited phrase: %r", found.group(0))
+        issues.append("prohibited_content_pattern")
+    issues += _evidence_issues(text, catalog, refs, context)
     decision = catalog["deterministic_decision"]
     for match in re.finditer(r"\b(Critical|High|Medium|Low)\s+(?:priority|severity)\b|\bpriority\s*(?:is|:|=|of)?\s*(Critical|High|Medium|Low)\b", text, re.I):
         if (match.group(1) or match.group(2)).lower() != decision["priority"].lower(): issues.append("priority_contradiction")
@@ -56,9 +60,11 @@ def validate_narrative(alert: AlertIn, rules: RuleOutput, output) -> list[str]:
     return sorted(set(issues))
 
 
-def _evidence_issues(text: str, triggers: set, refs: set, observations: dict, context: set, policy_markers: set) -> list[str]:
+def _evidence_issues(text: str, catalog: dict, refs: set, context: set) -> list[str]:
+    triggers = {item["rule_id"] for item in catalog["triggering_rules"]}
+    observations = {item["evidence_id"]: item for item in catalog["context_observations"]}
     issues = []
-    known_ids = triggers | set(observations) | policy_markers | {"DECISION_FINAL"}
+    known_ids = triggers | set(observations) | set(catalog["policy_markers"]) | {"DECISION_FINAL"}
     for id in re.findall(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b", text):
         if id not in known_ids: issues.append("unknown_inline_evidence_id")
         elif id in triggers and id not in refs: issues.append("uncited_inline_rule")
@@ -80,12 +86,28 @@ def _evidence_issues(text: str, triggers: set, refs: set, observations: dict, co
                 aliases = {"beats/min": "bpm", "breaths/min": "/min"}
                 if aliases.get(normalized, normalized) != units.get(key, "").lower(): issues.append("measurement_unit_mismatch")
             covered.append(match.span(1))
-    # Unlabeled counts are accepted only when they equal a cited count observation ("2 prior alerts").
-    counts = {observations[id]["value"] for id in COUNT_OBSERVATIONS if id in observations and id in context and observations[id]["available"]}
+    # Digits inside supplied text (unit "4-East", message text, rule conditions) are quoted evidence, not claims.
+    quoted = [item["condition"] for item in catalog["triggering_rules"]]
+    for item in observations.values():
+        values = item["value"] if isinstance(item["value"], list) else [item["value"]]
+        quoted += [v for v in values if isinstance(v, str) and len(v) > 1]
+    for value in quoted:
+        covered += [m.span() for m in re.finditer(re.escape(value), text, re.I)]
+    # Unlabeled numbers are accepted when they equal a cited observation value ("2 prior alerts"), a
+    # triggering-rule threshold ("repeat count below 3") or the number of triggering rules ("1 rule").
+    allowed = {item["value"] for id, item in observations.items() if id in context and item["available"]
+               and isinstance(item["value"], (int, float)) and not isinstance(item["value"], bool)}
+    allowed |= {float(n) for item in catalog["triggering_rules"] for n in re.findall(r"\d+(?:\.\d+)?", item["condition"])}
+    allowed.add(len(triggers))
+    unverified = []
     for match in re.finditer(r"(?<![\w])[-+]?\d+(?:\.\d+)?", text):
         if any(start <= match.start() and match.end() <= end for start, end in covered): continue
-        if float(match.group(0)) in counts: continue
+        if float(match.group(0)) in allowed: continue
         if match.group(0) == "24" and re.match(r"(?:h\b|-? ?hours?\b|-hour\b)", text[match.end():], re.I): continue
+        unverified.append(match.group(0))
+    if unverified:
+        # Raw provider text is not archived; the offending tokens alone make rejections diagnosable in logs.
+        logger.warning("Narrative rejected for unverified numbers: %s", ", ".join(unverified[:10]))
         issues.append("unverified_numeric_claim")
     return issues
 
@@ -99,7 +121,7 @@ def validate_escalation(alert: AlertIn, rules: RuleOutput, escalation) -> list[s
     issues = []
     if not context or not context.issubset({id for id, item in observations.items() if item["available"]}): issues.append("context_references_mismatch")
     if CLINICAL_PROHIBITED.search(escalation.reason): issues.append("prohibited_content_pattern")
-    issues += _evidence_issues(escalation.reason, triggers, triggers, observations, context, set(catalog["policy_markers"]))
+    issues += _evidence_issues(escalation.reason, catalog, triggers, context)
     return sorted(set(issues))
 
 
