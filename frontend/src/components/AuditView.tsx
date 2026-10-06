@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { AlertType, AuditLogEntry, ExplanationMode } from '../types'
 import { ALERT_TYPE_LABELS } from '../simulator/presets'
+import { About } from './Callouts'
 import { PRIORITIES } from '../types'
 
 interface Props {
@@ -234,6 +235,6 @@ function ExpandedRow({ entry }: { entry: AuditLogEntry }) {
     {error && <p role="alert">{error} <button className="button" onClick={() => setRetry(r => r + 1)}>Retry history</button></p>}
     {audit && <ReviewHistory audit={audit} />}
     <h4>Generation provenance</h4><GenerationDetails provenance={audit?.triage_result.provenance ?? entry.provenance} />
-    <p className="muted small">Manual demo rule weight: {entry.rule_confidence.toFixed(2)}. This is not measured clinical reliability.</p>
+    <p className="small">Manual demo rule weight: {entry.rule_confidence.toFixed(2)}.</p><About>Rule weights are manually assigned demo metadata, not measured clinical reliability.</About>
   </div>
 }

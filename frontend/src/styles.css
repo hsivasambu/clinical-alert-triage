@@ -112,3 +112,26 @@ dialog:not([open]) { display: none; } dialog::backdrop { background: rgba(0,0,0,
 .audit-timeline time { font-size: .8rem; color: var(--muted, #566579); }
 
 .audit-detail { width: min(720px, calc(100vw - 96px)); max-width: 100%; overflow-wrap: anywhere; }
+
+/* Descriptions vs. outputs: "About" callouts describe the demo; titled output panels hold what the system produced. */
+.about { background: #f4f6f9; border: 1px dashed #c3cedb; border-left: 3px solid #9aa9bb; border-radius: 8px; padding: 9px 12px; margin: 8px 0 12px; color: var(--muted); font-size: 12px; font-style: italic; line-height: 1.55; }
+.about-label { display: block; font-style: normal; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #6b7a8d; margin-bottom: 2px; }
+.output { border: 1px solid var(--output-border); border-radius: 8px; margin-top: 10px; background: #fff; overflow: hidden; }
+.output-title { margin: 0; padding: 5px 12px; background: var(--output-bg); color: var(--output-ink); font-size: 11px; font-weight: 700; letter-spacing: .3px; border-bottom: 1px solid var(--output-border); }
+.output-body { padding: 10px 12px; }
+.output-body > ul:first-child, .output-body > ol:first-child { margin-top: 0; } .output-body > ul:last-child, .output-body > ol:last-child { margin-bottom: 0; }
+.output-ai { --output-bg: #ebe9fc; --output-ink: #4a3b99; --output-border: #c9c1f1; }
+.output-system { --output-bg: #e4ecf8; --output-ink: #1f4a85; --output-border: #b9cbe6; }
+.output-rules { --output-bg: #e2f2ec; --output-ink: #1d5c43; --output-border: #b7dccb; }
+.output-input { --output-bg: #f0f2f5; --output-ink: #44546a; --output-border: #d3dae3; }
+.output .summary-text { margin: 0; }
+.output .narrative { border: 0; padding: 0; margin: 0; }
+.confidence-estimate { margin-top: 18px; }
+.output-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; font-size: 11px; }
+.legend-heading { font-weight: 700; color: var(--muted); margin-right: 4px; }
+.legend-item { padding: 2px 8px; border-radius: 5px; border: 1px solid; font-weight: 600; }
+.legend-about { background: #f4f6f9; border-style: dashed; border-color: #c3cedb; color: #6b7a8d; font-style: italic; }
+.legend-ai { background: #ebe9fc; border-color: #c9c1f1; color: #4a3b99; }
+.legend-system { background: #e4ecf8; border-color: #b9cbe6; color: #1f4a85; }
+.legend-rules { background: #e2f2ec; border-color: #b7dccb; color: #1d5c43; }
+.legend-input { background: #f0f2f5; border-color: #d3dae3; color: #44546a; }
