@@ -24,7 +24,8 @@ def prompt_hash(alert_type: str) -> str:
 
 def build_messages(alert: AlertIn, rule_output: RuleOutput) -> tuple[str, str]:
     system, template = prompt_metadata(alert.alert_type.value)
-    return system, Template(template).substitute(evidence_json=json.dumps(catalog_for(alert, rule_output), ensure_ascii=False, sort_keys=True))
+    catalog = {k: v for k, v in catalog_for(alert, rule_output).items() if k != "escalated_route"}  # Validator-only lookup.
+    return system, Template(template).substitute(evidence_json=json.dumps(catalog, ensure_ascii=False, sort_keys=True))
 
 
 def rendered_hash(alert: AlertIn, rules: RuleOutput) -> str:

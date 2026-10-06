@@ -1,5 +1,5 @@
 """Authoritative evidence catalog. Context is observed input, never a fired rule."""
-from models import AlertIn, EvidenceObservation, RuleOutput
+from models import AlertIn, EvidenceObservation, Priority, RuleOutput
 from router import resolve_route_with_reason
 from rules_engine import evidence_for
 
@@ -42,7 +42,10 @@ def observations_for(alert: AlertIn) -> list[EvidenceObservation]:
 
 def catalog_for(alert: AlertIn, rules: RuleOutput) -> dict:
     route, rationale = resolve_route_with_reason(alert, rules.baseline_priority, rules.suggested_route)
+    # Destination the router would pick at each priority, so narrative that mentions a proposed escalation is not a contradiction.
+    escalated_route = {p.value: resolve_route_with_reason(alert, p, rules.suggested_route)[0] for p in Priority}
     return {"deterministic_decision": {"evidence_id": "DECISION_FINAL", "priority": rules.baseline_priority.value, "route": route, "routing_reason": rationale},
+            "escalated_route": escalated_route,
             "triggering_rules": [item.model_dump() for item in evidence_for(alert, rules) if item.rule_id != "NO_RULE_MATCHED"],
             "policy_markers": [id for id in rules.matched_rules if id == "NO_RULE_MATCHED"],
             "context_observations": [item.model_dump() for item in observations_for(alert)], "missing_inputs": rules.missing_fields}
