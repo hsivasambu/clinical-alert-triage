@@ -142,3 +142,59 @@ def test_inline_observation_ids_are_added_to_citations():
                triggering_rule_ids=["NURSE_CALL_SINGLE"], context_evidence_ids=["OBS_UNIT"], confidence=0.8, escalation=None)
     result = _parse_and_validate(alert, rules, json.dumps(raw), generation_metadata(alert, rules))
     assert result.context_evidence_ids == ["OBS_UNIT", "OBS_FALL_RISK_SCORE", "OBS_RECENT_MEDICATIONS"]
+
+
+def ai_supported_example():
+    """The frontend "AI-supported decision" scenario as the live demo submits it."""
+    from models import AlertIn
+    return AlertIn.model_validate({
+        "alert_id": "SIM-AI-SUPPORT", "source_system": "Nurse-Call-Panel", "alert_type": "nurse_call", "patient_id": "P-10042",
+        "unit": "4-East Surgical", "room": "312", "bed": "A", "timestamp": "2026-10-06T19:23:38Z", "repeat_count": 0,
+        "message_text": "Patient reports feeling dizzy and is trying to get up to the bathroom alone",
+        "vital_signs": {}, "recent_context": {"prior_alerts_24h": 2, "recent_medications": ["lorazepam", "oxycodone"],
+        "fall_risk_score": 72, "admission_reason": "Hip replacement recovery", "code_status": "Full"}})
+
+
+@pytest.mark.parametrize("context_ids,factors", [
+    # Live failure: references outside the supplied observations rejected the whole answer.
+    (["OBS_FALL_RISK_SCORE", "DECISION_FINAL", "NURSE_CALL_SINGLE"], ["OBS_FALL_RISK_SCORE is recorded."]),
+    (["OBS_DIZZINESS", "OBS_RECENT_MEDICATIONS"], ["OBS_RECENT_MEDICATIONS is recorded.", "OBS_DIZZINESS is recorded in the message."]),
+    ([], ["OBS_PRIOR_ALERTS_24H records 2 prior alerts in the last 24h; room 312 is noted."]),
+])
+def test_ai_supported_example_survives_reference_mistakes(monkeypatch, context_ids, factors):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    import openai
+    from llm_explainer import explain_with_outcome
+    monkeypatch.setenv("OPENAI_API_KEY", "test"); monkeypatch.setenv("LLM_ENABLED", "true")
+    raw = {"summary": "A single assistance call matched NURSE_CALL_SINGLE; DECISION_FINAL records the decision.",
+           "rationale": "NURSE_CALL_SINGLE is the only triggering rule, so the router kept the rule-selected destination.",
+           "factors_considered": [*factors, "OBS_UNIT records 4-East Surgical."],
+           "uncertainty_notes": "No vital signs were supplied.", "recommended_checks": ["Verify the recorded medication list."],
+           "triggering_rule_ids": [], "context_evidence_ids": context_ids, "confidence": 0.8,
+           "escalation": {"proposed_priority": "Medium", "reason": "OBS_RECENT_MEDICATIONS, OBS_FALL_RISK_SCORE and OBS_MESSAGE_TEXT warrant earlier bedside review.",
+                          "context_evidence_ids": ["OBS_RECENT_MEDICATIONS", "OBS_FALL_RISK_SCORE", "OBS_STAFFING"]}}
+    client = MagicMock()
+    client.chat.completions.create.return_value = SimpleNamespace(model="gpt-4o-mini-2024-07-18", choices=[SimpleNamespace(
+        finish_reason="stop", message=SimpleNamespace(content=json.dumps(raw), refusal=None))])
+    monkeypatch.setattr(openai, "OpenAI", MagicMock(return_value=client))
+    alert = ai_supported_example(); rules = evaluate(alert)
+    result = apply(alert, rules, explain_with_outcome(alert, rules))
+    assert result.explanation.explanation_mode == ExplanationMode.hybrid, result.provenance.validation_issues
+    assert result.provenance.validation_outcome == "accepted_by_practical_checks"
+    assert set(result.explanation.referenced_context_ids) <= {o.evidence_id for o in result.explanation.context_observations}
+    assert result.explanation.ai_adjustment.status == "applied" and result.final_priority == Priority.medium
+    assert "OBS_STAFFING" not in result.explanation.ai_adjustment.context_evidence_ids
+
+
+def test_invented_rule_id_still_rejects(monkeypatch):
+    from llm_explainer import LLMFallbackError, _parse_and_validate
+    from provenance import generation_metadata
+    import json
+    alert = ai_supported_example(); rules = evaluate(alert)
+    raw = dict(summary="DECISION_FINAL is recorded.", rationale="NURSE_CALL_SINGLE matched.", factors_considered=["OBS_UNIT is recorded."],
+               uncertainty_notes="Not verified.", recommended_checks=["Verify source."], triggering_rule_ids=["FABRICATED_RULE"],
+               context_evidence_ids=["OBS_UNIT"], confidence=0.8)
+    with pytest.raises(LLMFallbackError):
+        _parse_and_validate(alert, rules, json.dumps(raw), generation_metadata(alert, rules))

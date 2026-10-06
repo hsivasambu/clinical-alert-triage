@@ -19,7 +19,7 @@ from typing import Annotated, Optional
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StringConstraints, ValidationError, field_validator
 
 from models import AlertIn, FallbackReason, GenerationProvenance, Priority, RuleOutput
-from explanation_contract import rejection_reason, validate_narrative
+from explanation_contract import item_issues, rejection_reason, validate_narrative
 from provenance import generation_metadata
 from prompt_builder import build_messages
 from evidence import catalog_for
@@ -217,12 +217,43 @@ def _call_llm(alert: AlertIn, rule_output: RuleOutput, metadata: GenerationProve
     return _parse_and_validate(alert, rule_output, raw_text, metadata)
 
 
-def _cite_inline_observations(alert: AlertIn, rules: RuleOutput, result: LLMRawOutput) -> LLMRawOutput:
-    """Add supplied OBS_ IDs the narrative mentions but forgot to list; unknown IDs still reject."""
-    supplied = {item["evidence_id"] for item in catalog_for(alert, rules)["context_observations"]}
-    text = "\n".join([result.summary, result.rationale, *result.factors_considered, result.uncertainty_notes, *result.recommended_checks])
-    missing = [id for id in dict.fromkeys(re.findall(r"\bOBS_[A-Z0-9_]+\b", text)) if id in supplied and id not in result.context_evidence_ids]
-    return result.model_copy(update={"context_evidence_ids": [*result.context_evidence_ids, *missing]}) if missing else result
+def _normalize_references(alert: AlertIn, rules: RuleOutput, result: LLMRawOutput, metadata: GenerationProvenance) -> LLMRawOutput:
+    """Repair bookkeeping the server can check itself, so one bad reference does not discard the answer.
+
+    The server knows which rules fired and which observations it supplied, so it completes the
+    trigger list, drops citations of unsupplied observations, adds supplied OBS_ IDs the text
+    mentions, and drops factor/check items that fail the content checks on their own. Summary,
+    rationale and uncertainty text are still validated whole. Every repair is recorded.
+    """
+    catalog = catalog_for(alert, rules)
+    supplied = {item["evidence_id"] for item in catalog["context_observations"]}
+    triggers = [item["rule_id"] for item in catalog["triggering_rules"]]
+    repairs, update = [], {}
+    # Missing or repeated trigger IDs are filled from the rules; an invented rule ID still rejects.
+    if set(result.triggering_rule_ids) <= set(triggers) and (set(result.triggering_rule_ids) != set(triggers) or len(result.triggering_rule_ids) != len(triggers)):
+        repairs.append("repaired_trigger_references"); update["triggering_rule_ids"] = triggers
+    context = list(dict.fromkeys(id for id in result.context_evidence_ids if id in supplied))
+    if len(context) != len(result.context_evidence_ids):
+        dropped = [id for id in result.context_evidence_ids if id not in supplied]
+        if dropped:
+            logger.warning("Dropped unsupplied context references: %s", ", ".join(dropped[:10]))
+            repairs.append("dropped_unsupplied_context_references")
+    for key in ["factors_considered", "recommended_checks"]:
+        kept = [item for item in getattr(result, key) if not item_issues(alert, rules, item, set(triggers), supplied)]
+        if kept and len(kept) != len(getattr(result, key)):
+            repairs.append(f"dropped_invalid_{key}"); update[key] = kept
+    text = "\n".join([result.summary, result.rationale, *update.get("factors_considered", result.factors_considered),
+                      result.uncertainty_notes, *update.get("recommended_checks", result.recommended_checks)])
+    context += [id for id in dict.fromkeys(re.findall(r"\bOBS_[A-Z0-9_]+\b", text)) if id in supplied and id not in context]
+    if context != list(result.context_evidence_ids): update["context_evidence_ids"] = context
+    if result.escalation is not None:
+        esc_context = [id for id in dict.fromkeys(result.escalation.context_evidence_ids) if id in supplied]
+        esc_context += [id for id in dict.fromkeys(re.findall(r"\bOBS_[A-Z0-9_]+\b", result.escalation.reason)) if id in supplied and id not in esc_context]
+        if esc_context and esc_context != list(result.escalation.context_evidence_ids):
+            repairs.append("repaired_escalation_references")
+            update["escalation"] = result.escalation.model_copy(update={"context_evidence_ids": esc_context})
+    metadata.validation_issues = repairs
+    return result.model_copy(update=update) if update else result
 
 
 def _parse_and_validate(alert: AlertIn, rules: RuleOutput, raw_text: str, metadata: GenerationProvenance) -> LLMRawOutput:
@@ -234,10 +265,11 @@ def _parse_and_validate(alert: AlertIn, rules: RuleOutput, raw_text: str, metada
         result = LLMRawOutput.model_validate(data)
     except ValidationError:
         raise LLMFallbackError("schema_invalid") from None
-    result = _cite_inline_observations(alert, rules, result)
+    result = _normalize_references(alert, rules, result, metadata)
     issues = validate_narrative(alert, rules, result)
     if issues:
-        metadata.validation_issues = issues
+        logger.warning("Narrative rejected: %s", ", ".join(issues))
+        metadata.validation_issues = [*metadata.validation_issues, *issues]
         raise LLMFallbackError(rejection_reason(issues))
     raw_confidence = result.confidence
     cap = _confidence_cap(alert)
