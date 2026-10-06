@@ -13,7 +13,7 @@ from router import Routes
 
 logger = logging.getLogger(__name__)
 
-VALIDATION_VERSION = "evidence-contract-v3"
+VALIDATION_VERSION = "evidence-contract-v4"
 _CLINICAL = (r"diagnos\w*|differential|probable cause|likely cause|caused by|due to|secondary to|consistent with|"
     r"suggests? (?:sepsis|infection|arrhythmia)|sepsis|hypox(?:emia|aemia)|arrhythmia|"
     r"treat\w*|administer\w*|prescrib\w*|dosage|intubat\w*|"
@@ -110,6 +110,13 @@ def _evidence_issues(text: str, catalog: dict, refs: set, context: set) -> list[
         logger.warning("Narrative rejected for unverified numbers: %s", ", ".join(unverified[:10]))
         issues.append("unverified_numeric_claim")
     return issues
+
+
+def item_issues(alert: AlertIn, rules: RuleOutput, text: str, refs: set, context: set) -> list[str]:
+    """Checks for one narrative list item, so a bad item can be dropped instead of rejecting the answer."""
+    catalog = catalog_for(alert, rules)
+    issues = ["prohibited_content_pattern"] if PROHIBITED.search(text) else []
+    return issues + _evidence_issues(text, catalog, refs, context)
 
 
 def validate_escalation(alert: AlertIn, rules: RuleOutput, escalation) -> list[str]:
