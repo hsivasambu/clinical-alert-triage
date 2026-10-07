@@ -62,8 +62,8 @@ for (const width of [1440, 390]) {
     expect(postCount).toBe(1)
     await page.getByRole('button', { name: 'Back to queue' }).click()
     await expect(page.getByRole('heading', { name: 'Alert Queue' })).toBeVisible()
-    await page.getByRole('button', { name: 'Advanced customization' }).click()
-    await expect(page.getByText('Alert Simulator', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Create your own alert' }).click()
+    await expect(page.getByRole('heading', { name: 'Create your own alert' })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
   })
 }

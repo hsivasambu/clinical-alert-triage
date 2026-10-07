@@ -22,7 +22,9 @@ export interface PresetFields {
   fall_risk_score: string
   admission_reason: string
   code_status: string
-  additional_context: string
+  /** Infusion-pump fields; sent as the alert's typed additional context. */
+  alarm_type: string
+  infusate: string
 }
 
 const BASE: PresetFields = {
@@ -46,7 +48,8 @@ const BASE: PresetFields = {
   fall_risk_score: '',
   admission_reason: '',
   code_status: 'Full',
-  additional_context: '',
+  alarm_type: '',
+  infusate: '',
 }
 
 export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
@@ -99,7 +102,8 @@ export const PRESETS: Record<AlertType, PresetFields> = {
     blood_pressure_systolic: '128',
     blood_pressure_diastolic: '78',
     admission_reason: 'Post-op care',
-    additional_context: JSON.stringify({ alarm_type: 'occlusion', infusate: 'heparin', rate_ml_hr: 20, line: 'central' }, null, 2),
+    alarm_type: 'occlusion',
+    infusate: 'heparin',
   },
   nurse_call: {
     ...BASE,

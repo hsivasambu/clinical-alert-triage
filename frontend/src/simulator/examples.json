@@ -1,0 +1,353 @@
+[
+ {
+  "id": "threshold",
+  "mode": "rules",
+  "title": "Fast heart rate over threshold",
+  "description": "A heart rate above the fixed threshold makes the rules set High priority on their own. Follow the rule evidence, explanation and human review.",
+  "alert": {
+   "source_system": "Demo-Simulator",
+   "alert_type": "tachycardia",
+   "patient_id": "P-20011",
+   "unit": "3-West",
+   "room": "312",
+   "bed": "A",
+   "device_type": "Cardiac Monitor",
+   "message_text": "Sustained tachycardia - HR > 130 bpm",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": 138,
+    "spo2": 96,
+    "blood_pressure_systolic": 142,
+    "blood_pressure_diastolic": 88,
+    "respiratory_rate": 18,
+    "temperature": 37.2
+   },
+   "recent_context": {
+    "prior_alerts_24h": 0,
+    "recent_medications": [],
+    "fall_risk_score": null,
+    "admission_reason": "Chest pain evaluation",
+    "code_status": "Full"
+   },
+   "additional_context": {}
+  }
+ },
+ {
+  "id": "low-oxygen",
+  "mode": "rules",
+  "title": "Critically low oxygen in ICU",
+  "description": "An oxygen saturation below the critical threshold makes the rules set Critical priority, and the ICU unit sends it to the ICU team.",
+  "alert": {
+   "source_system": "Demo-Simulator",
+   "alert_type": "low_spo2",
+   "patient_id": "P-20012",
+   "unit": "ICU",
+   "room": "105",
+   "bed": "B",
+   "device_type": "Pulse Oximeter",
+   "message_text": "SpO2 critically low - below 88%",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": 104,
+    "spo2": 85,
+    "blood_pressure_systolic": 98,
+    "blood_pressure_diastolic": 62,
+    "respiratory_rate": 26,
+    "temperature": 37.8
+   },
+   "recent_context": {
+    "prior_alerts_24h": 0,
+    "recent_medications": [],
+    "fall_risk_score": null,
+    "admission_reason": "Respiratory distress",
+    "code_status": "Full"
+   },
+   "additional_context": {}
+  }
+ },
+ {
+  "id": "pump-occlusion",
+  "mode": "rules",
+  "title": "Heparin pump occlusion",
+  "description": "An occlusion alarm sets High priority, and because the pump is running heparin the router adds a pharmacy consult.",
+  "alert": {
+   "source_system": "Demo-Simulator",
+   "alert_type": "infusion_pump",
+   "patient_id": "P-20013",
+   "unit": "3-West",
+   "room": "318",
+   "bed": "A",
+   "device_type": "Infusion Pump",
+   "message_text": "Occlusion alarm on primary IV line",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": 88,
+    "spo2": 97,
+    "blood_pressure_systolic": 128,
+    "blood_pressure_diastolic": 78,
+    "respiratory_rate": null,
+    "temperature": null
+   },
+   "recent_context": {
+    "prior_alerts_24h": 0,
+    "recent_medications": [],
+    "fall_risk_score": null,
+    "admission_reason": "Post-op care",
+    "code_status": "Full"
+   },
+   "additional_context": {
+    "alarm_type": "occlusion",
+    "infusate": "heparin"
+   }
+  }
+ },
+ {
+  "id": "repeat",
+  "mode": "rules",
+  "title": "Repeated nurse call",
+  "description": "A nurse call with three repeats raises the priority under the rules and sends it to the charge nurse. Accept or override to inspect the append-only review trail.",
+  "alert": {
+   "source_system": "Nurse-Call-Panel",
+   "alert_type": "nurse_call",
+   "patient_id": "P-20014",
+   "unit": "3-West",
+   "room": "320",
+   "bed": "A",
+   "device_type": null,
+   "message_text": "Patient requesting assistance - bathroom",
+   "repeat_count": 3,
+   "vital_signs": {
+    "heart_rate": null,
+    "spo2": null,
+    "blood_pressure_systolic": null,
+    "blood_pressure_diastolic": null,
+    "respiratory_rate": null,
+    "temperature": null
+   },
+   "recent_context": {
+    "prior_alerts_24h": 0,
+    "recent_medications": [],
+    "fall_risk_score": null,
+    "admission_reason": "Hip replacement recovery",
+    "code_status": "Full"
+   },
+   "additional_context": {}
+  }
+ },
+ {
+  "id": "sepsis-screen",
+  "mode": "rules",
+  "title": "Sepsis screen with two criteria",
+  "description": "Temperature, heart rate and breathing rate meet the screening criteria, so the rules set Critical priority and route to the Rapid Response Team.",
+  "alert": {
+   "source_system": "Demo-Simulator",
+   "alert_type": "sepsis",
+   "patient_id": "P-20015",
+   "unit": "5-North Medical",
+   "room": "508",
+   "bed": "A",
+   "device_type": "EHR-Screening",
+   "message_text": "SIRS criteria positive - sepsis screening alert",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": 98,
+    "spo2": 94,
+    "blood_pressure_systolic": 102,
+    "blood_pressure_diastolic": 64,
+    "respiratory_rate": 24,
+    "temperature": 38.7
+   },
+   "recent_context": {
+    "prior_alerts_24h": 0,
+    "recent_medications": [],
+    "fall_risk_score": null,
+    "admission_reason": "Suspected pneumonia",
+    "code_status": "Full"
+   },
+   "additional_context": {}
+  }
+ },
+ {
+  "id": "ai-support",
+  "mode": "ai",
+  "title": "Dizzy patient getting up alone",
+  "description": "A single bathroom call is Low priority under the rules, but the patient is on sedating medications, has a high fall-risk score and had earlier alerts today, and says they are dizzy and getting up alone. The rules alone would not raise it; the AI reviewer can raise the priority by one level, never lower it, and the router still picks the team. Needs the AI explanation service to be configured.",
+  "alert": {
+   "source_system": "Nurse-Call-Panel",
+   "alert_type": "nurse_call",
+   "patient_id": "P-10042",
+   "unit": "4-East Surgical",
+   "room": "312",
+   "bed": "A",
+   "device_type": null,
+   "message_text": "Patient reports feeling dizzy and is trying to get up to the bathroom alone",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": null,
+    "spo2": null,
+    "blood_pressure_systolic": null,
+    "blood_pressure_diastolic": null,
+    "respiratory_rate": null,
+    "temperature": null
+   },
+   "recent_context": {
+    "prior_alerts_24h": 2,
+    "recent_medications": [
+     "lorazepam",
+     "oxycodone"
+    ],
+    "fall_risk_score": 72,
+    "admission_reason": "Hip replacement recovery",
+    "code_status": "Full"
+   },
+   "additional_context": {}
+  }
+ },
+ {
+  "id": "ai-confused-call",
+  "mode": "ai",
+  "title": "Confused patient climbing out of bed",
+  "description": "A single call is Low priority under the rules, but the message says the patient is confused and climbing out of bed after a sleeping pill and an opioid, with a high fall-risk score and three earlier alerts today. The rules alone would not raise it; the AI reviewer can raise the priority by one level, never lower it, and the router still picks the team. Needs the AI explanation service to be configured.",
+  "alert": {
+   "source_system": "Nurse-Call-Panel",
+   "alert_type": "nurse_call",
+   "patient_id": "P-30021",
+   "unit": "6-West Orthopedics",
+   "room": "614",
+   "bed": "B",
+   "device_type": null,
+   "message_text": "Family reports patient is confused and trying to climb out of bed",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": null,
+    "spo2": null,
+    "blood_pressure_systolic": null,
+    "blood_pressure_diastolic": null,
+    "respiratory_rate": null,
+    "temperature": null
+   },
+   "recent_context": {
+    "prior_alerts_24h": 3,
+    "recent_medications": [
+     "zolpidem",
+     "hydromorphone"
+    ],
+    "fall_risk_score": 80,
+    "admission_reason": "Spinal fusion recovery",
+    "code_status": "Full"
+   },
+   "additional_context": {}
+  }
+ },
+ {
+  "id": "ai-lightheaded",
+  "mode": "ai",
+  "title": "Mild heart-rate alert, lightheaded patient",
+  "description": "A mildly fast heart rate is Low priority under the rules, but the patient says they feel lightheaded when standing, recently had an opioid and a sedating antihistamine, has a high fall-risk score and two earlier alerts today. The rules alone would not raise it; the AI reviewer can raise the priority by one level, never lower it, and the router still picks the team. Needs the AI explanation service to be configured.",
+  "alert": {
+   "source_system": "Demo-Simulator",
+   "alert_type": "tachycardia",
+   "patient_id": "P-30022",
+   "unit": "4-East Surgical",
+   "room": "406",
+   "bed": "A",
+   "device_type": "Telemetry Monitor",
+   "message_text": "Patient reports feeling lightheaded when standing",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": 106,
+    "spo2": 96,
+    "blood_pressure_systolic": 118,
+    "blood_pressure_diastolic": 72,
+    "respiratory_rate": 18,
+    "temperature": 37.0
+   },
+   "recent_context": {
+    "prior_alerts_24h": 2,
+    "recent_medications": [
+     "oxycodone",
+     "diphenhydramine"
+    ],
+    "fall_risk_score": 60,
+    "admission_reason": "Knee replacement recovery",
+    "code_status": "Full"
+   },
+   "additional_context": {}
+  }
+ },
+ {
+  "id": "ai-sedated-oxygen",
+  "mode": "ai",
+  "title": "Oxygen dipping after sedation",
+  "description": "An oxygen reading just below normal is Medium priority under the rules, but it keeps dipping while the patient sleeps after an opioid and a benzodiazepine, with three earlier alerts today. The rules alone would not raise it; the AI reviewer can raise the priority by one level, never lower it, and the router still picks the team. Needs the AI explanation service to be configured.",
+  "alert": {
+   "source_system": "Demo-Simulator",
+   "alert_type": "low_spo2",
+   "patient_id": "P-30023",
+   "unit": "5-South Surgical",
+   "room": "522",
+   "bed": "A",
+   "device_type": "Pulse Oximeter",
+   "message_text": "SpO2 dipping repeatedly while patient is asleep",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": 72,
+    "spo2": 93,
+    "blood_pressure_systolic": 112,
+    "blood_pressure_diastolic": 70,
+    "respiratory_rate": 12,
+    "temperature": 36.9
+   },
+   "recent_context": {
+    "prior_alerts_24h": 3,
+    "recent_medications": [
+     "hydromorphone",
+     "lorazepam"
+    ],
+    "fall_risk_score": 50,
+    "admission_reason": "Abdominal surgery recovery",
+    "code_status": "Full"
+   },
+   "additional_context": {}
+  }
+ },
+ {
+  "id": "ai-pca-drowsy",
+  "mode": "ai",
+  "title": "Pain pump alarm, drowsy patient",
+  "description": "A low-battery alarm on a pain pump is Medium priority under the rules, but the family says the patient is very drowsy, the patient is on an opioid and a sedating medication, and there were two earlier alerts today. The rules alone would not raise it; the AI reviewer can raise the priority by one level, never lower it, and the router still picks the team. Needs the AI explanation service to be configured.",
+  "alert": {
+   "source_system": "Demo-Simulator",
+   "alert_type": "infusion_pump",
+   "patient_id": "P-30024",
+   "unit": "5-South Surgical",
+   "room": "530",
+   "bed": "A",
+   "device_type": "PCA Pump",
+   "message_text": "PCA pump battery low; family says patient is very drowsy and hard to wake",
+   "repeat_count": 0,
+   "vital_signs": {
+    "heart_rate": 64,
+    "spo2": 95,
+    "blood_pressure_systolic": 108,
+    "blood_pressure_diastolic": 66,
+    "respiratory_rate": null,
+    "temperature": null
+   },
+   "recent_context": {
+    "prior_alerts_24h": 2,
+    "recent_medications": [
+     "hydromorphone",
+     "gabapentin"
+    ],
+    "fall_risk_score": 55,
+    "admission_reason": "Colectomy recovery",
+    "code_status": "Full"
+   },
+   "additional_context": {
+    "alarm_type": "battery_low",
+    "infusate": "hydromorphone PCA"
+   }
+  }
+ }
+]

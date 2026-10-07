@@ -7,7 +7,7 @@
 ## Demo walkthrough
 
 1. Open the demo or start it locally below. An available example is selected initially without replacing later user selections. Historical fixtures are labeled; alert time and processing time are distinct.
-2. Choose **Deterministic threshold**, **Context-based routing**, or **Repeat escalation**, then **Run example**. Each submits a fresh simulated alert. **Advanced customization** opens the full six-type simulator.
+2. Pick one of five **Rules-based routing** or five **AI-supported decision** examples, then **Run example**. Each submits a fresh simulated alert. After you have tried them, **Create your own alert** opens the full six-type simulator.
 3. Inspect the priority/destination/review header and six explanation sections: summary, factors, routing rationale, uncertainty, readable rule evidence, verification guidance. Expand source, full context or technical provenance as needed.
 4. Accept the displayed version, or override with reviewer label and reason. Compare original and effective decisions; leave explanation feedback.
 5. Read chronological audit history and refresh. Saved reviews return when backend storage persists. Selecting an alert displays its **recorded** explanation, without generating a new model answer.

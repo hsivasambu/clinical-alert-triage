@@ -24,16 +24,10 @@ function parseCount(value: string): number {
 export function buildAlert(form: SimulationFields): AlertIn {
   if (!form.timestamp || !Number.isFinite(Date.parse(form.timestamp))) throw new Error('A valid alert time is required.')
   if (!form.patient_id.trim() || !form.unit.trim()) throw new Error('Patient ID and unit are required.')
-  let additionalContext: Record<string, unknown> = {}
-  if (form.additional_context.trim()) {
-    try {
-      const parsed = JSON.parse(form.additional_context)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        additionalContext = parsed as Record<string, unknown>
-      }
-    } catch {
-      // validated before submit
-    }
+  const additionalContext: Record<string, unknown> = {}
+  if (form.alert_type === 'infusion_pump') {
+    if (form.alarm_type.trim()) additionalContext.alarm_type = form.alarm_type.trim()
+    if (form.infusate.trim()) additionalContext.infusate = form.infusate.trim()
   }
 
   return {

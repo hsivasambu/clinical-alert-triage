@@ -30,14 +30,14 @@ test('compact queue sorting, combined filters, hidden selection and keyboard sem
 })
 for (const width of [1440, 390]) test(`simulator and audit dialog focus, labels, Escape and restoration at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
-  for (const [openerName, title] of [['Advanced customization', 'Alert Simulator'], ['Audit Log', 'Audit Log']]) {
+  for (const [openerName, title] of [['Create your own alert', 'Create your own alert'], ['Audit Log', 'Audit Log']]) {
     const opener = page.getByRole('button', { name: openerName, exact: true })
     await opener.click()
     const dialog = page.getByRole('dialog', { name: title, exact: true })
     await expect(dialog).toBeVisible()
     await page.screenshot({ path: `test-results/dialog-${title.replaceAll(' ', '-')}-${width}.png` })
     expect(await dialog.evaluate(node => node.contains(document.activeElement))).toBe(true)
-    if (title === 'Alert Simulator') { await expect(dialog.getByLabel('Patient ID *', { exact: true })).toBeVisible(); await expect(dialog.getByLabel('Alert time', { exact: true })).toBeAttached() }
+    if (title === 'Create your own alert') { await expect(dialog.getByLabel('Patient ID *', { exact: true })).toBeVisible(); await expect(dialog.getByLabel('Alert time', { exact: true })).toBeAttached() }
     else await expect(dialog.getByLabel('Original priority')).toBeVisible()
     const controls = dialog.locator('button, input, select, textarea').filter({ visible: true })
     await controls.last().focus(); await page.keyboard.press('Tab')
