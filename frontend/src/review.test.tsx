@@ -176,9 +176,9 @@ describe('human review workflow', () => {
     complete([critical, high])
     await screen.findByRole('button', { name: 'View alert CRIT' })
     expect(screen.getByRole('button', { name: 'View alert SCENARIO' }).getAttribute('aria-current')).toBe('true')
-    expect(screen.queryByText('Alert Simulator')).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Advanced customization' }))
-    expect(screen.getByText('Alert Simulator')).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Create your own alert' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Create your own alert' }))
+    expect(screen.getByRole('heading', { name: 'Create your own alert' })).toBeTruthy()
   })
   it('reports a failed scenario without replacing the selected alert', async () => {
     render(<App />)

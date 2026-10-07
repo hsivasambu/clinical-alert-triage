@@ -15,6 +15,7 @@ interface Props {
   onClose: () => void
 }
 
+const PUMP_ALARMS = [['occlusion', 'Occlusion'], ['air_in_line', 'Air in line'], ['battery_low', 'Battery low'], ['', 'Other / not specified']]
 const ALERT_TYPES: AlertType[] = ['tachycardia', 'low_spo2', 'infusion_pump', 'nurse_call', 'fall_risk', 'sepsis']
 
 function nowLocalDatetime(): string {
@@ -40,16 +41,6 @@ function validateForm(form: FormState): string | null {
   if (!form.alert_id.trim()) return 'Alert ID is required.'
   if (!form.patient_id.trim()) return 'Patient ID is required.'
   if (!form.unit.trim()) return 'Unit is required.'
-  if (form.additional_context.trim()) {
-    try {
-      const parsed = JSON.parse(form.additional_context)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return 'Additional context must be a JSON object.'
-      }
-    } catch {
-      return 'Additional context must be valid JSON.'
-    }
-  }
   return null
 }
 
@@ -94,7 +85,7 @@ export function AlertSimulator({ onResult, onClose }: Props) {
     <Dialog titleId="simulator-modal-title" className="simulator-modal" onClose={onClose}>
         <div className="simulator-modal-header">
           <div>
-            <h2 id="simulator-modal-title" className="dialog-title">Alert Simulator</h2>
+            <h2 id="simulator-modal-title" className="dialog-title">Create your own alert</h2>
             <span style={{ marginLeft: 10, fontSize: 12, color: '#90caf9', background: '#1a4a7a', padding: '2px 8px', borderRadius: 4 }}>
               Rules are decision authority | LLM is explainability only
             </span>
@@ -146,7 +137,7 @@ export function AlertSimulator({ onResult, onClose }: Props) {
                   value={form.alert_type}
                   onChange={(e) => {
                     const t = e.target.value as AlertType
-                    setForm((prev) => ({ ...prev, alert_type: t, message_text: PRESETS[t].message_text }))
+                    setForm((prev) => ({ ...prev, alert_type: t, message_text: PRESETS[t].message_text, alarm_type: PRESETS[t].alarm_type, infusate: PRESETS[t].infusate }))
                   }}
                 >
                   {ALERT_TYPES.map((t) => (
@@ -264,15 +255,18 @@ export function AlertSimulator({ onResult, onClose }: Props) {
             </FieldRow>
           </FormSection>
 
-          <FormSection title="Additional Context (optional JSON)">
-            <textarea aria-label="Additional context (optional JSON)"
-              className="simulator-input" style={{ width: '100%', minHeight: 80, fontFamily: 'monospace', fontSize: 12, resize: 'vertical', boxSizing: 'border-box' }}
-              value={form.additional_context}
-              onChange={(e) => set('additional_context', e.target.value)}
-              placeholder={'{\n  "key": "value"\n}'}
-              spellCheck={false}
-            />
-          </FormSection>
+          {form.alert_type === 'infusion_pump' && <FormSection title="Infusion Pump">
+            <FieldRow>
+              <Field label="Pump Alarm Type">
+                <select className="simulator-input" value={form.alarm_type} onChange={(e) => set('alarm_type', e.target.value)}>
+                  {PUMP_ALARMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </Field>
+              <Field label="Infusing Medication" hint="Some medications add a pharmacy consult">
+                <input className="simulator-input" value={form.infusate} onChange={(e) => set('infusate', e.target.value)} placeholder="e.g. heparin" />
+              </Field>
+            </FieldRow>
+          </FormSection>}
         </div>
 
         <div className="simulator-modal-footer">
